@@ -1,0 +1,67 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  fullName     String
+  dietaryGoals String?       // e.g. "Low Sodium, High Protein"
+  allergies    UserAllergy[]
+  scans        ScanHistory[]
+  favorites    Favorite[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model UserAllergy {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  allergen  String   // e.g. "Peanuts", "Gluten", "Dairy", "Soy"
+  createdAt DateTime @default(now())
+}
+
+model ScanHistory {
+  id                 String     @id @default(uuid())
+  userId             String
+  user               User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scanType           String     // "PACKAGED", "MEAL", "QUALITY_INSPECTION"
+  barcode            String?
+  imageUrl           String?
+  productName        String
+  brandName          String?
+  calories           Float?
+  proteins           Float?
+  carbs              Float?
+  fats               Float?
+  sugar              Float?
+  sodium             Float?
+  saturatedFat       Float?
+  nutritionScore     String?    // e.g., "A", "B", "C", "D", "E" or "88/100"
+  rawOcrText         String?
+  ingredients        String?    // JSON string array
+  detectedAllergens  String?    // JSON string array
+  additives          String?    // JSON string array of additive objects
+  qualityAnalysis    String?    // JSON string object
+  confidenceScore    Float?     // e.g., 0.95
+  favorites          Favorite[]
+  createdAt          DateTime   @default(now())
+}
+
+model Favorite {
+  id        String      @id @default(uuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scanId    String
+  scan      ScanHistory @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+
+  @@unique([userId, scanId])
+}
