@@ -1,8 +1,5 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { runUnifiedVisionAnalysis } from './aiVision.service';
 import { findFoodInCatalog } from '../db/foodCatalog';
-
-const apiKey = process.env.GEMINI_API_KEY || '';
-const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
 export interface IdentifiedFoodItem {
   name: string;
@@ -62,10 +59,8 @@ export const runMealIntelligencePipeline = async (params: {
 }): Promise<MealIntelligenceResult> => {
   const { imageBase64, mimeType, customDishName, foodCategory } = params;
 
-  if (genAI && imageBase64) {
-    try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-      const prompt = `You are an expert AI food computer vision scientist & nutritionist.
+  if (imageBase64) {
+    const prompt = `You are an expert AI food computer vision scientist & nutritionist.
 Analyze the photo of ${foodCategory === 'HOME_FOOD' ? 'homemade home-cooked food' : (foodCategory === 'OUTSIDE_PACKAGED' ? 'packaged store-bought food or biscuits' : 'restaurant or dining dish')}.
 Identify MULTIPLE food items on the plate. Estimate portion sizes and nutritional values accurately.
 ${customDishName ? `User hint: ${customDishName}` : ''}
@@ -107,23 +102,15 @@ CRITICAL REQUIREMENT: Return STRICT JSON ONLY (no markdown text) matching schema
     "overall": 0.88
   },
   "isEstimated": true,
-  "primaryDataSource": "Gemini Multi-Modal Vision + USDA Reference Data",
+  "primaryDataSource": "AI Vision Engine (Grok / Gemini)",
   "estimationDisclaimer": "${MANDATORY_MEAL_DISCLAIMER}",
   "likelyIngredients": ["ingredient 1", "ingredient 2"],
   "healthSummary": "High protein meal rich in omega-3 fatty acids."
 }`;
 
-      const cleanBase64 = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
-      const imagePart = { inlineData: { data: cleanBase64, mimeType: mimeType || 'image/jpeg' } };
-      const result = await model.generateContent([prompt, imagePart]);
-      const response = await result.response;
-      const text = response.text() || '';
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-    } catch (err) {
-      console.warn('Gemini meal intelligence vision call error:', err);
+    const visionResult = await runUnifiedVisionAnalysis({ prompt, imageBase64, mimeType });
+    if (visionResult && visionResult.detectedDishName) {
+      return visionResult;
     }
   }
 

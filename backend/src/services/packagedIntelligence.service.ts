@@ -1,8 +1,5 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { fetchBarcodeData, BarcodeProductResult } from './barcode.service';
-
-const apiKey = process.env.GEMINI_API_KEY || '';
-const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
+import { runUnifiedVisionAnalysis } from './aiVision.service';
 
 export type DataSourceType = 'PACKAGE_OCR' | 'EXTERNAL_DATABASE' | 'AI_ESTIMATE';
 
@@ -266,10 +263,8 @@ export const runPackagedIntelligencePipeline = async (params: {
 
   let ocrResult: Partial<PackagedIntelligenceResult> | null = null;
 
-  if (imageBase64 && genAI) {
-    try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-      const prompt = `You are a certified food scientist & OCR computer vision engine. Analyze the packaging image.
+  if (imageBase64) {
+    const prompt = `You are a certified food scientist & OCR computer vision engine. Analyze the packaging image.
 Identify EXACT BRAND NAME and EXACT PRODUCT NAME. Extract text via OCR, ingredients, nutrition facts, and additives.
 
 CRITICAL REQUIREMENT: Return STRICT JSON ONLY (no markdown formatting, no plain text) matching schema:
@@ -306,18 +301,7 @@ CRITICAL REQUIREMENT: Return STRICT JSON ONLY (no markdown formatting, no plain 
   "uncertaintyWarnings": []
 }`;
 
-      const cleanBase64 = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
-      const imagePart = { inlineData: { data: cleanBase64, mimeType: mimeType || 'image/jpeg' } };
-      const result = await model.generateContent([prompt, imagePart]);
-      const response = await result.response;
-      const text = response.text() || '';
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        ocrResult = JSON.parse(jsonMatch[0]);
-      }
-    } catch (err) {
-      console.warn('Gemini vision OCR execution error:', err);
-    }
+    ocrResult = await runUnifiedVisionAnalysis({ prompt, imageBase64, mimeType });
   }
 
   return mergeAndNormalizePackagedData({

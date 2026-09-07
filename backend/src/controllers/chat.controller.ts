@@ -1,9 +1,6 @@
 import { Request, Response } from 'express';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { runUnifiedChat } from '../services/aiVision.service';
 import { findFoodInCatalog, FOOD_MASTER_CATALOG } from '../db/foodCatalog';
-
-const apiKey = process.env.GEMINI_API_KEY || '';
-const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
 export const handleNutritionChat = async (req: Request, res: Response) => {
   try {
@@ -33,44 +30,34 @@ export const handleNutritionChat = async (req: Request, res: Response) => {
       }
     }
 
-    // Run Gemini 1.5 Flash if API Key available
-    if (genAI) {
-      try {
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-        const contextPrompt = currentFoodContext
-          ? `Current Food Scanned: ${JSON.stringify(currentFoodContext)}. `
-          : '';
+    // Run Grok / Gemini AI if API Key is configured
+    const contextPrompt = currentFoodContext
+      ? `Current Food Scanned: ${JSON.stringify(currentFoodContext)}. `
+      : '';
 
-        const systemPrompt = `You are FoodScan AI's expert certified clinical nutritionist and food scientist.
+    const systemPrompt = `You are FoodScan AI's expert certified clinical nutritionist and food scientist.
 ${contextPrompt}
-User Query: "${message}"
-
 Instructions:
 1. Provide a warm, concise, scientifically accurate answer (max 3-4 bullet points or short paragraphs).
 2. If the user asks about diabetes, hypertension, weight loss, or ingredients, give direct practical health guidance.
 3. If the food has high sugar, palm oil, or NOVA 4 status, recommend clean alternatives.
 4. Keep the tone helpful, encouraging, and medical-grade yet easy to understand for everyday shoppers.`;
 
-        const result = await model.generateContent(systemPrompt);
-        const response = await result.response;
-        const replyText = response.text();
-
-        return res.status(200).json({
-          success: true,
-          data: {
-            reply: replyText,
-            suggestions: [
-              "What is a healthier alternative?",
-              "Is this safe for diabetics?",
-              "How to burn these calories?",
-              "Can I eat this daily?"
-            ],
-            recommendedSwaps: recommendedSwaps.length > 0 ? recommendedSwaps : undefined
-          }
-        });
-      } catch (geminiErr) {
-        console.warn('Gemini chat error, using expert rule engine:', geminiErr);
-      }
+    const aiReply = await runUnifiedChat({ systemPrompt, userMessage: message });
+    if (aiReply) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          reply: aiReply,
+          suggestions: [
+            "What is a healthier alternative?",
+            "Is this safe for diabetics?",
+            "How to burn these calories?",
+            "Can I eat this daily?"
+          ],
+          recommendedSwaps: recommendedSwaps.length > 0 ? recommendedSwaps : undefined
+        }
+      });
     }
 
     // Built-in Expert Nutrition Rule Engine Fallback
