@@ -1,16 +1,26 @@
 import axios from 'axios';
 
-const getApiBaseUrl = (): string => {
+export const getApiBaseUrl = (): string => {
   const envUrl = (import.meta as any).env?.VITE_API_URL;
   if (envUrl) return envUrl;
 
-  if (typeof window !== 'undefined' && window.location?.hostname) {
-    const host = window.location.hostname;
-    if (host !== 'localhost' && host !== '127.0.0.1') {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('foodscan_api_url');
+    if (saved) return saved;
+
+    const host = window.location?.hostname;
+    const protocol = window.location?.protocol;
+
+    // Running inside native Capacitor Android APK or local file protocol
+    if (protocol === 'capacitor:' || protocol === 'file:' || host === 'localhost' || host === '127.0.0.1') {
+      return 'http://192.168.31.218:5001/api';
+    }
+
+    if (host && host !== 'localhost' && host !== '127.0.0.1') {
       return `http://${host}:5001/api`;
     }
   }
-  return 'http://localhost:5001/api';
+  return 'http://192.168.31.218:5001/api';
 };
 
 export const apiClient = axios.create({
@@ -23,6 +33,9 @@ export const apiClient = axios.create({
 
 export const updateApiBaseUrl = (newUrl: string) => {
   apiClient.defaults.baseURL = newUrl;
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('foodscan_api_url', newUrl);
+  }
 };
 
 export const setAuthToken = (token: string | null) => {
