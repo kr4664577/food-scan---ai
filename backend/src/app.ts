@@ -7,7 +7,9 @@ import authRoutes from './routes/auth.routes';
 import scanRoutes from './routes/scan.routes';
 import historyRoutes from './routes/history.routes';
 import uploadRoutes from './routes/upload.routes';
+import chatRoutes from './routes/chat.routes';
 import { errorHandler } from './middlewares/error.middleware';
+import { seedFoodDatabase } from './db/seedFoods';
 
 dotenv.config();
 
@@ -42,12 +44,14 @@ app.use('/api/auth', authRoutes);
 app.use('/api/scan', scanRoutes);
 app.use('/api/history', historyRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/chat', chatRoutes);
 
 // Global Error Handler (Adheres to KI Error Handling Guidelines)
 app.use(errorHandler);
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 FoodScan AI Backend API running on http://localhost:${PORT}`);
+  await seedFoodDatabase();
 });
 
 export default app;

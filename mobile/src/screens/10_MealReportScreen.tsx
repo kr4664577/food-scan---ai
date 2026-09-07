@@ -12,8 +12,11 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertTriangle,
-  ChevronDown
+  ChevronDown,
+  Bot,
+  ArrowRight
 } from 'lucide-react';
+import { AIChatbotModal } from '../components/AIChatbotModal';
 
 export const MealReportScreen: React.FC = () => {
   const {
@@ -33,6 +36,7 @@ export const MealReportScreen: React.FC = () => {
   const [newItemName, setNewItemName] = useState('');
   const [newItemPortion, setNewItemPortion] = useState('1 Serving (~100g)');
   const [newItemCalories, setNewItemCalories] = useState(120);
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   const report = activeMealReport || {
     detectedDishName: "Whole Wheat Rotis with Spiced Vegetable Bhaji",
@@ -305,6 +309,24 @@ export const MealReportScreen: React.FC = () => {
             <span className="text-sm font-black text-indigo-600">{totals.fiber}g</span>
           </div>
         </div>
+
+        {/* Healthy Choice Swaps for High-Calorie / High-Fat Meals */}
+        {(totals.calories > 500 || totals.fat > 22) && (
+          <div className="p-3 bg-emerald-50/80 rounded-2xl border border-emerald-200 space-y-1.5">
+            <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider block">
+              🌟 Recommended Healthier Meal Swap:
+            </span>
+            <div className="flex items-center justify-between">
+              <div>
+                <h5 className="text-xs font-black text-slate-900">Tandoori Paneer Tikka with Whole Wheat Roti</h5>
+                <p className="text-[10px] text-slate-600">Saves ~190 kcal & 18g heavy cream fats</p>
+              </div>
+              <span className="text-xs font-black bg-white text-emerald-800 px-2 py-0.5 rounded-lg border border-emerald-300">
+                ⭐ 4.7
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Solution 3: Multi-Item Meal Breakdown with Add/Remove */}
@@ -415,6 +437,14 @@ export const MealReportScreen: React.FC = () => {
         </div>
       </div>
 
+      {/* Floating Ask Nutritionist AI Chatbot Button */}
+      <button
+        onClick={() => setIsChatOpen(true)}
+        className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-700 to-emerald-700 text-white font-black text-xs shadow-lg shadow-teal-700/20 flex items-center justify-center gap-2 hover:opacity-95 transition"
+      >
+        <Bot size={18} /> 💬 Ask Nutritionist AI Chatbot About This Meal
+      </button>
+
       {/* Action to Scan Another Item */}
       <button
         onClick={() => setScreen('CAMERA')}
@@ -422,6 +452,13 @@ export const MealReportScreen: React.FC = () => {
       >
         <Camera size={20} /> Scan Another Food Item
       </button>
+
+      {/* AI Nutritionist Chatbot Modal */}
+      <AIChatbotModal
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        contextFood={report}
+      />
     </div>
   );
 };

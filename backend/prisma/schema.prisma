@@ -65,3 +65,29 @@ model Favorite {
 
   @@unique([userId, scanId])
 }
+
+model FoodMasterItem {
+  id             String   @id @default(uuid())
+  category       String   // "HOME_FOOD", "RESTAURANT_FOOD", "OUTSIDE_PACKAGED", "FRUITS", "VEGETABLES"
+  name           String   @unique
+  brandName      String?
+  barcode        String?
+  keywords       String   // comma-separated search terms
+  portion        String
+  calories       Float
+  protein        Float
+  carbs          Float
+  fat            Float
+  fiber          Float?
+  sugar          Float?
+  sodium         Float?
+  saturatedFat   Float?
+  truthScore     Float    // 0.0 to 5.0
+  novaLevel      Int      // 1, 2, 3, 4
+  ratingCategory String   // "GOOD", "MODERATE", "BAD"
+  healthySwaps   String?  // JSON string of recommended healthier options
+  ingredients    String?  // JSON string array
+  allergens      String?  // JSON string array
+  healthSummary  String?
+  createdAt      DateTime @default(now())
+}

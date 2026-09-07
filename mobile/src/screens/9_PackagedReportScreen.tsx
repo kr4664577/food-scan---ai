@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import { AlertTriangle, CheckCircle2, Heart, ShieldAlert, Sparkles, FileText, Camera, Star, ArrowRight, Info, AlertOctagon, Flame } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Heart, ShieldAlert, Sparkles, FileText, Camera, Star, ArrowRight, Info, AlertOctagon, Flame, Bot } from 'lucide-react';
+import { AIChatbotModal } from '../components/AIChatbotModal';
 
 export const PackagedReportScreen: React.FC = () => {
   const { activePackagedReport, setScreen } = useAppStore();
   const [showOcr, setShowOcr] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   const report = activePackagedReport || {
     productName: "Britannia Good Day Butter Cookies",
@@ -76,6 +78,42 @@ export const PackagedReportScreen: React.FC = () => {
 
   return (
     <div className="pb-28 pt-4 px-4 space-y-4 max-w-md mx-auto">
+      {/* TruthIn Feature: Unhealthy / Bad Food Rating Alert Banner */}
+      {truthScore < 3.0 && (
+        <div className="p-4 rounded-3xl bg-rose-600 text-white shadow-xl space-y-2.5 animate-fadeIn">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertOctagon size={22} className="shrink-0 text-white" />
+              <h4 className="text-xs font-black uppercase tracking-wider">Unhealthy Food Rating ({truthScore} / 5.0 ⭐)</h4>
+            </div>
+            <span className="text-[9px] font-black bg-white/20 border border-white/30 px-2 py-0.5 rounded-full uppercase">
+              Poor Score
+            </span>
+          </div>
+          <p className="text-[11px] text-white/90 leading-relaxed font-medium">
+            This food has an ultra-processed score due to high added sugars and refined oils. We recommend picking a healthier clean choice below!
+          </p>
+
+          {/* Instant Healthy Swap Shortcut */}
+          {report.healthierSwaps && report.healthierSwaps.length > 0 && (
+            <div className="p-3 bg-white text-slate-900 rounded-2xl border border-rose-200 shadow-md">
+              <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider block mb-1">
+                🌟 Recommended Healthy Swap:
+              </span>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h5 className="text-xs font-black text-slate-900">{report.healthierSwaps[0].name}</h5>
+                  <p className="text-[10px] text-slate-600">{report.healthierSwaps[0].brand} • {report.healthierSwaps[0].reason}</p>
+                </div>
+                <span className="text-xs font-black bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-xl border border-emerald-300 shrink-0">
+                  ⭐ {report.healthierSwaps[0].rating}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Product Overview Header Card */}
       <div className="food-card p-5 rounded-3xl relative overflow-hidden bg-white border border-slate-200 shadow-sm">
         <div className="flex items-start justify-between mb-3">
@@ -291,6 +329,14 @@ export const PackagedReportScreen: React.FC = () => {
         )}
       </div>
 
+      {/* Floating Ask Nutritionist AI Chatbot Button */}
+      <button
+        onClick={() => setIsChatOpen(true)}
+        className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-700 to-emerald-700 text-white font-black text-xs shadow-lg shadow-teal-700/20 flex items-center justify-center gap-2 hover:opacity-95 transition"
+      >
+        <Bot size={18} /> 💬 Ask Nutritionist AI Chatbot About This Food
+      </button>
+
       {/* Action to Scan Another Item */}
       <button
         onClick={() => setScreen('CAMERA')}
@@ -298,6 +344,13 @@ export const PackagedReportScreen: React.FC = () => {
       >
         <Camera size={20} /> Scan Another Food Item
       </button>
+
+      {/* AI Nutritionist Chatbot Modal */}
+      <AIChatbotModal
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        contextFood={report}
+      />
     </div>
   );
 };

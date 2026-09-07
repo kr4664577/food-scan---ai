@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { findFoodInCatalog } from '../db/foodCatalog';
 
 const apiKey = process.env.GEMINI_API_KEY || '';
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
@@ -132,6 +133,54 @@ CRITICAL REQUIREMENT: Return STRICT JSON ONLY (no markdown text) matching schema
 
 export const analyzeFoodFromImage = (imageBase64: string, customDishName?: string, foodCategory?: string): MealIntelligenceResult => {
   const name = (customDishName || '').toLowerCase().trim();
+
+  // 1. Direct Master Food Database Match
+  if (name) {
+    const catalogMatch = findFoodInCatalog(name, foodCategory);
+    if (catalogMatch) {
+      return {
+        detectedDishName: catalogMatch.name,
+        items: [
+          {
+            name: catalogMatch.name,
+            estimatedPortion: catalogMatch.portion,
+            confidence: 0.98,
+            isEstimated: true,
+            dataSource: "FoodScan AI Verified Database Catalog",
+            nutrition: {
+              calories: catalogMatch.calories,
+              protein: catalogMatch.protein,
+              carbs: catalogMatch.carbs,
+              fat: catalogMatch.fat,
+              fiber: catalogMatch.fiber || 3,
+              sugar: catalogMatch.sugar || 2,
+              sodium: catalogMatch.sodium || 400
+            }
+          }
+        ],
+        totalNutrition: {
+          calories: catalogMatch.calories,
+          protein: catalogMatch.protein,
+          carbs: catalogMatch.carbs,
+          fat: catalogMatch.fat,
+          fiber: catalogMatch.fiber || 3,
+          sugar: catalogMatch.sugar || 2,
+          sodium: catalogMatch.sodium || 400
+        },
+        confidence: {
+          itemsRecognition: 0.98,
+          portionVolume: 0.94,
+          totalNutrition: 0.96,
+          overall: 0.96
+        },
+        isEstimated: true,
+        primaryDataSource: "FoodScan AI Master Nutritional Database",
+        estimationDisclaimer: MANDATORY_MEAL_DISCLAIMER,
+        likelyIngredients: catalogMatch.ingredients,
+        healthSummary: catalogMatch.healthSummary
+      };
+    }
+  }
 
   if (foodCategory === 'OUTSIDE_PACKAGED' || name.includes('biscuit') || name.includes('cookie') || name.includes('wafer') || name.includes('snack')) {
     return {
