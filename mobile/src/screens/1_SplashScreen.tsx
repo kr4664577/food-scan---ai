@@ -13,10 +13,12 @@ export const SplashScreen: React.FC = () => {
 
       <div className="flex-1 flex flex-col items-center justify-center my-auto z-10">
         <div className="relative mb-6">
-          <div className="w-24 h-24 rounded-3xl bg-gradient-to-tr from-emerald-500 via-teal-500 to-cyan-400 p-1 shadow-2xl shadow-emerald-500/30 animate-pulse">
-            <div className="w-full h-full bg-slate-950 rounded-[22px] flex items-center justify-center">
-              <Scan className="w-12 h-12 text-emerald-400" />
-            </div>
+          <div className="w-28 h-28 rounded-3xl bg-gradient-to-tr from-emerald-500 via-teal-500 to-cyan-400 p-1 shadow-2xl shadow-emerald-500/30">
+            <img
+              src="/foodscan_logo.png"
+              alt="FoodScan AI"
+              className="w-full h-full rounded-[22px] object-cover shadow-inner"
+            />
           </div>
           <div className="absolute -bottom-2 -right-2 bg-emerald-500 text-slate-950 p-1.5 rounded-xl shadow-md">
             <Sparkles size={16} />

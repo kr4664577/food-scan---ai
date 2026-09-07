@@ -47,9 +47,11 @@ export const Header: React.FC = () => {
             </button>
           ) : (
             <div className="flex items-center gap-2.5 cursor-pointer group" onClick={() => setScreen('PROFILE')}>
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-600 font-extrabold shrink-0 shadow-sm">
-                <Scan size={20} className="text-emerald-600" />
-              </div>
+              <img
+                src="/foodscan_logo.png"
+                alt="FoodScan AI"
+                className="w-9 h-9 rounded-xl object-cover shadow-sm border border-emerald-500/30 group-hover:scale-105 transition shrink-0"
+              />
               <div className="truncate">
                 <div className="flex items-center gap-1">
                   <span className="text-xs font-extrabold text-slate-900 group-hover:text-emerald-600 transition flex items-center gap-1">

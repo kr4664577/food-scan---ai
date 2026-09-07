@@ -45,9 +45,11 @@ export const AuthScreen: React.FC = () => {
     <div className="min-h-screen flex flex-col justify-between p-6 bg-slate-950">
       <div className="pt-6">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-2xl bg-emerald-500 flex items-center justify-center text-slate-950 font-bold">
-            <Scan size={22} />
-          </div>
+          <img
+            src="/foodscan_logo.png"
+            alt="FoodScan AI"
+            className="w-10 h-10 rounded-2xl object-cover shadow-md border border-emerald-500/40"
+          />
           <span className="text-xl font-bold text-white">FoodScan AI</span>
         </div>
 
