@@ -58,6 +58,37 @@ export interface PackagedFoodAnalysis {
   rawOcrText?: string;
   nutritionScore?: string;
   
+  // TruthIn Feature Set
+  truthRating?: {
+    score: number; // e.g. 4.2 out of 5.0
+    maxScore: number;
+    ratingLabel: string;
+    ratingColor: string;
+  };
+  novaGroup?: {
+    level: 1 | 2 | 3 | 4;
+    label: string;
+    description: string;
+    badgeColor: string;
+  };
+  trafficLight?: {
+    overallStatus: 'GREEN' | 'YELLOW' | 'RED';
+    sugarStatus: 'GREEN' | 'YELLOW' | 'RED';
+    sodiumStatus: 'GREEN' | 'YELLOW' | 'RED';
+    fatStatus: 'GREEN' | 'YELLOW' | 'RED';
+  };
+  healthierSwaps?: Array<{
+    name: string;
+    brand: string;
+    calories: number;
+    rating: number;
+    reason: string;
+  }>;
+  hiddenIngredientsAlert?: {
+    hiddenSugars: string[];
+    cheapOils: string[];
+  };
+
   // Phase 2 Packaged Intelligence Fields
   confidence?: {
     productName: number;

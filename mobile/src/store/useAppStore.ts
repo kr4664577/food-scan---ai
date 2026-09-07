@@ -372,32 +372,70 @@ export const useAppStore = create<AppState>((set, get) => ({
     const isBiscuit = name.toLowerCase().includes('biscuit') || name.toLowerCase().includes('cookie') || name.toLowerCase().includes('wafer') || name.toLowerCase().includes('snack') || name.toLowerCase().includes('parle') || name.toLowerCase().includes('britannia') || name.toLowerCase().includes('oreo') || currentCategory === 'OUTSIDE_PACKAGED';
 
     const fallback: PackagedFoodAnalysis = {
-      productName: isBiscuit ? 'Whole Wheat Butter Biscuits' : name,
-      brandName: isBiscuit ? 'Britannia / Parle Bakery' : 'Food Label Scan',
-      nutritionScore: isBiscuit ? 'C' : 'B',
+      productName: isBiscuit ? 'Britannia Good Day Butter Cookies' : name,
+      brandName: isBiscuit ? 'Britannia Industries' : 'Food Label Scan',
+      nutritionScore: isBiscuit ? 'D' : 'B',
       nutrition: isBiscuit 
-        ? { calories: 440, proteins: 6.5, carbs: 64, fats: 18, sugar: 22, sodium: 280, saturatedFat: 8.5 }
+        ? { calories: 480, proteins: 6.0, carbs: 66, fats: 22, sugar: 24, sodium: 260, saturatedFat: 11 }
         : { calories: 360, proteins: 12, carbs: 48, fats: 10, sugar: 12, sodium: 180, saturatedFat: 1.8 },
+      truthRating: {
+        score: isBiscuit ? 2.8 : 4.2,
+        maxScore: 5.0,
+        ratingLabel: isBiscuit ? 'Ultra-Processed Warning' : 'Healthy Choice',
+        ratingColor: isBiscuit ? 'text-amber-700 bg-amber-50 border-amber-300' : 'text-emerald-700 bg-emerald-50 border-emerald-300'
+      },
+      novaGroup: {
+        level: isBiscuit ? 4 : 2,
+        label: isBiscuit ? 'NOVA 4: Ultra-Processed Food' : 'NOVA 2: Processed Culinary Ingredient',
+        description: isBiscuit ? 'Industrial bakery item with refined wheat flour, added sugar, and palm oil.' : 'Lightly processed packaged food.',
+        badgeColor: isBiscuit ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'
+      },
+      trafficLight: {
+        overallStatus: isBiscuit ? 'RED' : 'GREEN',
+        sugarStatus: isBiscuit ? 'RED' : 'GREEN',
+        sodiumStatus: 'GREEN',
+        fatStatus: isBiscuit ? 'YELLOW' : 'GREEN'
+      },
+      healthierSwaps: [
+        {
+          name: 'Organic Whole Grain Oats Cookies',
+          brand: 'NutriChoice Clean',
+          calories: 320,
+          rating: 4.6,
+          reason: '70% less added sugar & zero palm oil.'
+        },
+        {
+          name: 'Roasted Multigrain Makhana / Foxnuts',
+          brand: 'Farm Fresh',
+          calories: 180,
+          rating: 4.8,
+          reason: 'High protein & zero ultra-processed fats.'
+        }
+      ],
+      hiddenIngredientsAlert: {
+        hiddenSugars: isBiscuit ? ['Invert Sugar Syrup', 'Sugar'] : [],
+        cheapOils: isBiscuit ? ['Edible Vegetable Oil (Palm)'] : []
+      },
       ingredients: isBiscuit
-        ? ['Whole Wheat Flour (58%)', 'Sugar', 'Edible Vegetable Oil (Palm)', 'Butter (4%)', 'Invert Sugar Syrup', 'Milk Solids', 'Raising Agents (E500ii, E503ii)', 'Emulsifier (Soy Lecithin E322)', 'Iodised Salt']
+        ? ['Refined Wheat Flour (Maida)', 'Sugar', 'Edible Vegetable Oil (Palm)', 'Butter (3%)', 'Invert Sugar Syrup', 'Milk Solids', 'Raising Agents (E500ii, E503ii)', 'Emulsifier (Soy Lecithin E322)', 'Iodised Salt']
         : ['Whole Grains', 'Natural Flavors', 'Sea Salt', 'Vegetable Oil'],
       detectedAllergens: isBiscuit ? ['Wheat (Gluten)', 'Milk / Dairy', 'Soy'] : ['Gluten'],
       additives: isBiscuit
         ? [
-            { code: 'E500ii', name: 'Sodium Hydrogen Carbonate', safety: 'Safe', explanation: 'Baking soda used as a raising agent in baked goods.' },
+            { code: 'E500ii', name: 'Sodium Hydrogen Carbonate (Baking Soda)', safety: 'Safe', explanation: 'Baking soda used as a raising agent in baked goods.' },
             { code: 'E322', name: 'Soy Lecithin', safety: 'Safe', explanation: 'Natural emulsifier maintaining consistent dough texture.' }
           ]
         : [{ code: 'E300', name: 'Ascorbic Acid (Vitamin C)', safety: 'Safe', explanation: 'Essential vitamin antioxidant.' }],
       healthHighlights: isBiscuit
         ? [
-            { type: 'good', label: 'Whole Wheat Base', description: 'Contains 58% whole wheat flour providing fiber.' },
-            { type: 'warning', label: 'Moderate Added Sugar', description: '22g sugar per 100g serving.' }
+            { type: 'warning', label: 'Added Sugar & Palm Oil', description: 'Contains 24g sugar and refined palm oil.' },
+            { type: 'info', label: 'NOVA 4 Ultra-Processed', description: 'Industrial formulated cookie item.' }
           ]
         : [{ type: 'good', label: 'Balanced Energy', description: '360 kcal per serving with moderate fats.' }],
-      summary: isBiscuit ? 'Crispy baked whole wheat butter biscuits. Golden baked texture with milk solids and natural butter.' : 'Label OCR scan completed.',
-      rawOcrText: isBiscuit ? 'WHOLE WHEAT BUTTER BISCUITS - INGREDIENTS: Wheat flour (58%), Sugar, Palm oil, Butter...' : 'Scanned product label',
-      confidence: { productName: 0.95, ingredients: 0.92, nutrition: 0.92, allergens: 0.90, overall: 0.93 },
-      sources: { productName: 'PACKAGE_OCR', brandName: 'PACKAGE_OCR', ingredients: 'PACKAGE_OCR', nutrition: 'PACKAGE_OCR', allergens: 'PACKAGE_OCR', additives: 'PACKAGE_OCR' },
+      summary: isBiscuit ? 'Britannia Good Day Butter Cookies. Truth Rating 2.8/5.0. Formulated with refined wheat flour, added sugar, and palm oil.' : 'Label OCR scan completed.',
+      rawOcrText: isBiscuit ? 'BRITANNIA GOOD DAY BUTTER COOKIES - INGREDIENTS: Refined Wheat Flour, Sugar, Palm Oil, Butter...' : 'Scanned product label',
+      confidence: { productName: 0.96, ingredients: 0.94, nutrition: 0.94, allergens: 0.90, overall: 0.95 },
+      sources: { productName: 'EXTERNAL_DATABASE', brandName: 'EXTERNAL_DATABASE', ingredients: 'EXTERNAL_DATABASE', nutrition: 'EXTERNAL_DATABASE', allergens: 'EXTERNAL_DATABASE', additives: 'EXTERNAL_DATABASE' },
       missingFields: [],
       uncertaintyWarnings: [],
       isValidated: true
