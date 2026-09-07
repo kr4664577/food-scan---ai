@@ -65,24 +65,27 @@ export const runUnifiedVisionAnalysis = async (params: {
     }
   }
 
-  // 2. Try Google Gemini 1.5 Flash Vision if GEMINI_API_KEY is configured
+  // 2. Try Google Gemini Vision if GEMINI_API_KEY is configured
   const geminiKey = getGeminiApiKey();
   if (geminiKey) {
-    try {
-      console.log('✨ Running Vision Analysis via Google Gemini 1.5 Flash...');
-      const genAI = new GoogleGenerativeAI(geminiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-      const imagePart = { inlineData: { data: cleanBase64, mimeType } };
+    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-1.5-flash'];
+    for (const modelName of modelsToTry) {
+      try {
+        console.log(`✨ Running Vision Analysis via Google ${modelName}...`);
+        const genAI = new GoogleGenerativeAI(geminiKey);
+        const model = genAI.getGenerativeModel({ model: modelName });
+        const imagePart = { inlineData: { data: cleanBase64, mimeType } };
 
-      const result = await model.generateContent([prompt, imagePart]);
-      const response = await result.response;
-      const text = response.text() || '';
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
+        const result = await model.generateContent([prompt, imagePart]);
+        const response = await result.response;
+        const text = response.text() || '';
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          return JSON.parse(jsonMatch[0]);
+        }
+      } catch (geminiErr: any) {
+        console.warn(`⚠️ Gemini Vision (${modelName}) error:`, geminiErr?.message);
       }
-    } catch (geminiErr: any) {
-      console.warn('⚠️ Gemini Vision error:', geminiErr?.message);
     }
   }
 
@@ -131,14 +134,18 @@ export const runUnifiedChat = async (params: {
   // 2. Try Gemini
   const geminiKey = getGeminiApiKey();
   if (geminiKey) {
-    try {
-      const genAI = new GoogleGenerativeAI(geminiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-      const result = await model.generateContent(`${systemPrompt}\n\nUser Question: ${userMessage}`);
-      const response = await result.response;
-      return response.text() || null;
-    } catch (e: any) {
-      console.warn('Gemini chat error:', e?.message);
+    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-1.5-flash'];
+    for (const modelName of modelsToTry) {
+      try {
+        const genAI = new GoogleGenerativeAI(geminiKey);
+        const model = genAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent(`${systemPrompt}\n\nUser Question: ${userMessage}`);
+        const response = await result.response;
+        const text = response.text();
+        if (text) return text;
+      } catch (e: any) {
+        console.warn(`Gemini chat (${modelName}) error:`, e?.message);
+      }
     }
   }
 
