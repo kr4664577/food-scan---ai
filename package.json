@@ -1,0 +1,12 @@
+{
+  "name": "foodscan-ai-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install:all": "npm --prefix backend install && npm --prefix mobile install",
+    "build:mobile": "npm --prefix mobile run build",
+    "build:backend": "npm --prefix backend run build",
+    "build": "npm run build:mobile && npm run build:backend",
+    "start": "node backend/dist/app.js"
+  }
+}

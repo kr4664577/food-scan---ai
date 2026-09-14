@@ -29,7 +29,7 @@ const limiter = rateLimit({
 });
 app.use('/api', limiter);
 
-// Health check endpoints (supports /, /health, /api, and /api/health)
+// Health check endpoints (supports /health, /api, and /api/health)
 const healthHandler = (req: any, res: any) => {
   res.status(200).json({
     status: 'OK',
@@ -38,7 +38,6 @@ const healthHandler = (req: any, res: any) => {
     version: '1.0.0'
   });
 };
-app.get('/', healthHandler);
 app.get('/health', healthHandler);
 app.get('/api', healthHandler);
 app.get('/api/health', healthHandler);
@@ -49,6 +48,20 @@ app.use('/api/scan', scanRoutes);
 app.use('/api/history', historyRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/chat', chatRoutes);
+
+// Serve compiled mobile/web assets and APK downloads in production
+import path from 'path';
+import fs from 'fs';
+const frontendDist = path.join(__dirname, '../../mobile/dist');
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/health')) {
+      return next();
+    }
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
+}
 
 // Global Error Handler (Adheres to KI Error Handling Guidelines)
 app.use(errorHandler);
