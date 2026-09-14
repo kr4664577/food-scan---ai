@@ -66,9 +66,15 @@ if (fs.existsSync(frontendDist)) {
 // Global Error Handler (Adheres to KI Error Handling Guidelines)
 app.use(errorHandler);
 
-app.listen(Number(PORT), '0.0.0.0', async () => {
-  console.log(`🚀 FoodScan AI Backend API running on http://0.0.0.0:${PORT} (LAN: http://192.168.31.218:${PORT})`);
-  await seedFoodDatabase();
-});
+if (!process.env.VERCEL) {
+  app.listen(Number(PORT), '0.0.0.0', async () => {
+    console.log(`🚀 FoodScan AI Backend API running on http://0.0.0.0:${PORT} (LAN: http://192.168.31.218:${PORT})`);
+    try {
+      await seedFoodDatabase();
+    } catch (e) {
+      console.warn('Seed database notice:', e);
+    }
+  });
+}
 
 export default app;
