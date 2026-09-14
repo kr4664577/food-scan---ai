@@ -70,7 +70,7 @@ export const SettingsScreen: React.FC = () => {
             type="text"
             value={apiUrl}
             onChange={(e) => setApiUrl(e.target.value)}
-            placeholder="https://vetbx-2409-40c2-1235-2032-b5be-1223-3766-faf2.run.pinggy-free.link/api"
+            placeholder="https://cap-verification-deeply-appointed.trycloudflare.com/api"
             className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 px-4 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 font-medium"
           />
         </div>

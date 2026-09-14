@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-export const DEFAULT_API_URL = 'https://vetbx-2409-40c2-1235-2032-b5be-1223-3766-faf2.run.pinggy-free.link/api';
+export const DEFAULT_API_URL = 'https://cap-verification-deeply-appointed.trycloudflare.com/api';
 
 /**
  * Normalizes an API base URL:
