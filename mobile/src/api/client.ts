@@ -1,5 +1,7 @@
 import axios from 'axios';
 
+export const DEFAULT_API_URL = 'https://vetbx-2409-40c2-1235-2032-b5be-1223-3766-faf2.run.pinggy-free.link/api';
+
 /**
  * Normalizes an API base URL:
  * - Strips whitespace and trailing slashes.
@@ -7,7 +9,7 @@ import axios from 'axios';
  * - Ensures '/api' is appended if omitted, but prevents duplicating '/api/api'.
  */
 export const normalizeApiUrl = (rawUrl: string): string => {
-  if (!rawUrl || typeof rawUrl !== 'string') return 'http://192.168.31.218:5001/api';
+  if (!rawUrl || typeof rawUrl !== 'string') return DEFAULT_API_URL;
   let cleaned = rawUrl.trim().replace(/\/+$/, '');
   
   // Strip trailing /health if user pasted full health endpoint
@@ -30,24 +32,24 @@ export const getApiBaseUrl = (): string => {
     const saved = localStorage.getItem('foodscan_api_url');
     if (saved) {
       const normalized = normalizeApiUrl(saved);
-      // If running inside native Android APK and the saved URL points to localhost or 127.0.0.1,
-      // override with verified LAN IP so phone does not query itself
-      if (isCapacitor && (normalized.includes('localhost') || normalized.includes('127.0.0.1'))) {
-        return 'http://192.168.31.218:5001/api';
+      // If running inside native Android APK and the saved URL points to localhost or old LAN IP,
+      // upgrade to the verified HTTPS link so the phone connects immediately
+      if (isCapacitor && (normalized.includes('localhost') || normalized.includes('127.0.0.1') || normalized.includes('192.168.'))) {
+        return DEFAULT_API_URL;
       }
       return normalized;
     }
 
-    // Running inside native Capacitor Android APK: default to verified LAN IP
+    // Running inside native Capacitor Android APK: default to verified HTTPS link
     if (isCapacitor) {
-      return 'http://192.168.31.218:5001/api';
+      return DEFAULT_API_URL;
     }
 
     // In web browser (localhost, 127.0.0.1, or local network IP via Vite)
     // Always use '/api' to route seamlessly through Vite reverse proxy to backend port 5001
     return '/api';
   }
-  return 'http://192.168.31.218:5001/api';
+  return DEFAULT_API_URL;
 };
 
 export const apiClient = axios.create({

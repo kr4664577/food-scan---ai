@@ -60,7 +60,7 @@ export const SettingsScreen: React.FC = () => {
             <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">Backend Server URL</h3>
           </div>
           <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-            Wi-Fi Localhost
+            Cloud & Wi-Fi
           </span>
         </div>
 
@@ -70,7 +70,7 @@ export const SettingsScreen: React.FC = () => {
             type="text"
             value={apiUrl}
             onChange={(e) => setApiUrl(e.target.value)}
-            placeholder="http://192.168.31.218:5001/api"
+            placeholder="https://vetbx-2409-40c2-1235-2032-b5be-1223-3766-faf2.run.pinggy-free.link/api"
             className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 px-4 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 font-medium"
           />
         </div>
