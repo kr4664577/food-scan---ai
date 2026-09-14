@@ -4,7 +4,7 @@ import { Camera, Image as ImageIcon, Sparkles, X, Flashlight, RefreshCw, QrCode,
 import { ScanMode } from '../types';
 
 export const CameraScreen: React.FC = () => {
-  const { scanMode, setScanMode, setScreen, setCapturedImage, processBarcodeScan, processPackagedScan, processMealScan, processQualityScan } = useAppStore();
+  const { scanMode, setScanMode, setFoodCategory, setScreen, setCapturedImage } = useAppStore();
   const [flashlight, setFlashlight] = useState(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -16,24 +16,34 @@ export const CameraScreen: React.FC = () => {
 
   const samplePresets = [
     {
-      name: 'Rotis & Bhaji Meal',
-      image: 'https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=600&auto=format&fit=crop&q=80',
-      mode: 'MEAL_PHOTO' as ScanMode
+      name: '🍕 Margherita Pizza',
+      image: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=600&auto=format&fit=crop&q=80',
+      mode: 'MEAL_PHOTO' as ScanMode,
+      category: 'RESTAURANT_FOOD' as const
     },
     {
-      name: 'Salmon Meal Bowl',
-      image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&auto=format&fit=crop&q=80',
-      mode: 'MEAL_PHOTO' as ScanMode
+      name: '🍌 Fresh Banana',
+      image: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?w=600&auto=format&fit=crop&q=80',
+      mode: 'MEAL_PHOTO' as ScanMode,
+      category: 'FRUITS' as const
     },
     {
-      name: 'Granola Label (OCR)',
-      image: 'https://images.unsplash.com/photo-1517093728432-a0440f8d3380?w=600&auto=format&fit=crop&q=80',
-      mode: 'PACKAGED_PHOTO' as ScanMode
+      name: '🍚 Basmati Rice Bowl',
+      image: 'https://images.unsplash.com/photo-1516714435131-44d6b64dc6a2?w=600&auto=format&fit=crop&q=80',
+      mode: 'MEAL_PHOTO' as ScanMode,
+      category: 'HOME_FOOD' as const
     },
     {
-      name: 'Fresh Apple (Quality)',
+      name: '🍎 Red Apples',
       image: 'https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?w=600&auto=format&fit=crop&q=80',
-      mode: 'QUALITY_CHECK' as ScanMode
+      mode: 'MEAL_PHOTO' as ScanMode,
+      category: 'FRUITS' as const
+    },
+    {
+      name: '🍪 Packaged Snack (OCR)',
+      image: 'https://images.unsplash.com/photo-1599490659213-e2b9527bd087?w=600&auto=format&fit=crop&q=80',
+      mode: 'PACKAGED_PHOTO' as ScanMode,
+      category: 'OUTSIDE_PACKAGED' as const
     }
   ];
 
@@ -174,15 +184,47 @@ export const CameraScreen: React.FC = () => {
     setScreen('IMAGE_PREVIEW');
   };
 
+  // Client-side image optimizer: downscales large camera/gallery photos to max 1024px
+  const resizeImage = (dataUrl: string, maxDimension: number = 1024, quality: number = 0.85): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } else {
+          resolve(dataUrl);
+        }
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  };
+
   // File Upload Handler (Gallery / native photo picker)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = reader.result as string;
+      reader.onloadend = async () => {
+        const rawBase64 = reader.result as string;
+        const optimizedBase64 = await resizeImage(rawBase64, 1024, 0.85);
         stopCamera();
-        setCapturedImage(base64);
+        setCapturedImage(optimizedBase64);
         setScreen('IMAGE_PREVIEW');
       };
       reader.readAsDataURL(file);
@@ -393,6 +435,7 @@ export const CameraScreen: React.FC = () => {
               key={idx}
               onClick={() => {
                 setScanMode(preset.mode);
+                setFoodCategory(preset.category);
                 handleShutterCapture(preset.image);
               }}
               className="text-[11px] font-bold bg-slate-800 hover:bg-emerald-500/20 border border-slate-700 hover:border-emerald-500/50 text-slate-200 hover:text-emerald-400 px-3.5 py-1 rounded-xl whitespace-nowrap transition flex items-center gap-2 shadow-sm"

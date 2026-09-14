@@ -1,10 +1,21 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import { Sparkles, RefreshCw, ArrowLeft, CheckCircle2, FileSearch, Utensils, Edit3, Home, Store, Package } from 'lucide-react';
+import { Sparkles, RefreshCw, ArrowLeft, CheckCircle2, FileSearch, Utensils, Edit3, Home, Store, Package, AlertCircle } from 'lucide-react';
 import { FoodCategory, ScanMode } from '../types';
 
 export const ImagePreviewScreen: React.FC = () => {
-  const { capturedImage, scanMode, foodCategory, setFoodCategory, setScreen, processPackagedScan, processMealScan, processQualityScan, processBarcodeScan } = useAppStore();
+  const {
+    capturedImage,
+    scanMode,
+    foodCategory,
+    setFoodCategory,
+    setScreen,
+    processPackagedScan,
+    processMealScan,
+    processQualityScan,
+    processBarcodeScan,
+    errorMessage
+  } = useAppStore();
   const [customDishName, setCustomDishName] = useState('');
 
   const categoryBadges: Record<FoodCategory, string[]> = {
@@ -55,17 +66,17 @@ export const ImagePreviewScreen: React.FC = () => {
   };
 
   const handleConfirm = async () => {
+    if (!capturedImage) return;
     setScreen('AI_PROCESSING');
 
-    if (!capturedImage) return;
-
-    if (foodCategory === 'OUTSIDE_PACKAGED' || scanMode === 'PACKAGED_PHOTO') {
+    if (scanMode === 'PACKAGED_PHOTO' || (foodCategory === 'OUTSIDE_PACKAGED' && scanMode !== 'MEAL_PHOTO')) {
       await processPackagedScan(capturedImage, customDishName, foodCategory);
     } else if (scanMode === 'PACKAGED_BARCODE') {
       await processBarcodeScan('737628064502');
     } else if (scanMode === 'QUALITY_CHECK') {
       await processQualityScan(capturedImage);
     } else {
+      // MEAL_PHOTO pipeline
       await processMealScan(capturedImage, customDishName, foodCategory);
     }
   };
@@ -85,6 +96,17 @@ export const ImagePreviewScreen: React.FC = () => {
             <CheckCircle2 size={13} className="text-emerald-600" /> Photo Ready
           </span>
         </div>
+
+        {/* Error Alert Banner if previous scan failed */}
+        {errorMessage && (
+          <div className="mb-3 p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-2.5 text-rose-800 text-xs shadow-sm">
+            <AlertCircle size={18} className="text-rose-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-extrabold">Scan Unsuccessful</p>
+              <p className="text-[11px] text-rose-700 mt-0.5">{errorMessage}</p>
+            </div>
+          </div>
+        )}
 
         {/* 1. Category Selection Bar */}
         <div className="bg-white p-2 rounded-2xl border border-slate-200 shadow-sm mb-3">

@@ -1,38 +1,31 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import { updateApiBaseUrl, getApiBaseUrl, apiClient } from '../api/client';
-import { Settings, ShieldCheck, Server, Check, Wifi, AlertTriangle, Sparkles, Key } from 'lucide-react';
+import { updateApiBaseUrl, getApiBaseUrl, testBackendConnection, ConnectionTestResult } from '../api/client';
+import { Settings, Server, Check, Wifi, AlertTriangle, Sparkles, CheckCircle2, XCircle, Clock, Activity } from 'lucide-react';
 
 export const SettingsScreen: React.FC = () => {
   const { setScreen } = useAppStore();
   const [apiUrl, setApiUrl] = useState(getApiBaseUrl());
   const [isSaved, setIsSaved] = useState(false);
-  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
-  const [testMessage, setTestMessage] = useState('');
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
 
   const handleSaveSettings = () => {
-    updateApiBaseUrl(apiUrl);
+    const normalized = updateApiBaseUrl(apiUrl);
+    setApiUrl(normalized);
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2000);
   };
 
   const handleTestConnection = async () => {
-    setTestStatus('testing');
-    setTestMessage('Testing connection to ' + apiUrl + '...');
-    try {
-      updateApiBaseUrl(apiUrl);
-      const res = await apiClient.post('/chat', { message: 'Ping' }, { timeout: 4000 });
-      if (res.data?.success) {
-        setTestStatus('success');
-        setTestMessage('Connected successfully to FoodScan AI Server!');
-      } else {
-        setTestStatus('success');
-        setTestMessage('Server reached and responding.');
-      }
-    } catch (err: any) {
-      setTestStatus('failed');
-      setTestMessage('Cannot reach ' + apiUrl + '. Ensure phone & Mac are on same Wi-Fi.');
-    }
+    setIsTesting(true);
+    const normalizedUrl = updateApiBaseUrl(apiUrl);
+    setApiUrl(normalizedUrl);
+    setTestResult(null);
+
+    const result = await testBackendConnection(normalizedUrl);
+    setTestResult(result);
+    setIsTesting(false);
   };
 
   return (
@@ -45,17 +38,17 @@ export const SettingsScreen: React.FC = () => {
         </div>
       </div>
 
-      {/* Why Identification Needs Connection Alert */}
+      {/* How Identification Works Card */}
       <div className="food-card p-4.5 rounded-3xl border border-amber-200 bg-amber-50 space-y-2">
         <div className="flex items-center gap-2 text-amber-800 font-extrabold text-xs">
           <Sparkles size={18} className="text-amber-600" /> How Food Identification Works
         </div>
         <p className="text-xs text-amber-900 leading-relaxed">
-          The app uses a <strong>Master Food Database of 50+ items</strong> + <strong>Gemini 1.5 Multi-Modal Vision</strong>.
+          The app uses a <strong>Master Food Database</strong> + <strong>Google Gemini Multi-Modal Vision</strong>.
           <br /><br />
           • For <strong>exact detection</strong>, ensure the phone is connected to your backend server over Wi-Fi (URL below).
           <br />
-          • You can also add a free <strong>Gemini API Key</strong> in <code className="bg-amber-100 px-1 py-0.5 rounded font-mono text-[11px]">backend/.env</code> for live photo computer vision on ANY food!
+          • <strong>Health check endpoint:</strong> <code className="bg-amber-100 px-1 py-0.5 rounded font-mono text-[11px]">{apiUrl.replace(/\/+$/, '')}/health</code>
         </p>
       </div>
 
@@ -85,11 +78,11 @@ export const SettingsScreen: React.FC = () => {
         <div className="grid grid-cols-2 gap-2">
           <button
             onClick={handleTestConnection}
-            disabled={testStatus === 'testing'}
+            disabled={isTesting}
             className="py-2.5 px-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs transition flex items-center justify-center gap-1.5 border border-slate-200"
           >
-            <Wifi size={14} className={testStatus === 'testing' ? 'animate-pulse text-emerald-600' : ''} />
-            {testStatus === 'testing' ? 'Testing...' : 'Test Connection'}
+            <Wifi size={14} className={isTesting ? 'animate-pulse text-emerald-600' : ''} />
+            {isTesting ? 'Testing Health...' : 'Test Connection'}
           </button>
 
           <button
@@ -101,17 +94,65 @@ export const SettingsScreen: React.FC = () => {
           </button>
         </div>
 
-        {testStatus === 'success' && (
-          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-[11px] font-bold text-emerald-800 flex items-center gap-2">
-            <Check size={16} className="text-emerald-600 shrink-0" />
-            {testMessage}
+        {/* Live Diagnostics Card */}
+        {isTesting && (
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs space-y-1 text-slate-600">
+            <div className="flex items-center gap-2 font-bold text-slate-800">
+              <Activity size={14} className="animate-spin text-emerald-600" />
+              <span>Sending GET request to {apiUrl.replace(/\/+$/, '')}/health ...</span>
+            </div>
           </div>
         )}
 
-        {testStatus === 'failed' && (
-          <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-[11px] font-bold text-rose-800 flex items-center gap-2">
-            <AlertTriangle size={16} className="text-rose-600 shrink-0" />
-            {testMessage}
+        {testResult && !isTesting && (
+          <div className={`p-3.5 rounded-2xl border text-xs space-y-2 ${
+            testResult.success 
+              ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950' 
+              : 'bg-rose-50/90 border-rose-300 text-rose-950'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-extrabold text-[12px]">
+                {testResult.success ? (
+                  <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+                ) : (
+                  <XCircle size={16} className="text-rose-600 shrink-0" />
+                )}
+                <span>{testResult.success ? 'Backend Connection Succeeded' : `Connection Failed (${testResult.type})`}</span>
+              </div>
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-white/70 border border-black/10">
+                {testResult.elapsedMs}ms
+              </span>
+            </div>
+
+            <div className="text-[11px] font-medium leading-relaxed">
+              {testResult.message}
+            </div>
+
+            {/* Technical Request & Response Details */}
+            <div className="pt-2 border-t border-black/10 text-[10px] font-mono space-y-1">
+              <div>
+                <span className="font-bold">Request:</span> {testResult.method} {testResult.url}
+              </div>
+              <div>
+                <span className="font-bold">Status:</span> {testResult.status !== null ? `HTTP ${testResult.status} ${testResult.statusText || ''}` : 'No HTTP response received'}
+              </div>
+              {testResult.data && (
+                <div>
+                  <span className="font-bold">Response Body:</span>
+                  <pre className="mt-0.5 p-1.5 rounded bg-black/5 text-[10px] overflow-x-auto whitespace-pre-wrap break-all">
+                    {typeof testResult.data === 'object' ? JSON.stringify(testResult.data, null, 2) : String(testResult.data)}
+                  </pre>
+                </div>
+              )}
+              {testResult.rawError && (
+                <div>
+                  <span className="font-bold text-rose-700">Exception:</span>
+                  <div className="mt-0.5 p-1.5 rounded bg-rose-100/70 text-rose-900 font-mono text-[10px] break-all">
+                    {testResult.exceptionType}: {testResult.rawError}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

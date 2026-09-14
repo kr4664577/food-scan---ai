@@ -13,7 +13,7 @@ export const scanBarcode = async (req: AuthenticatedRequest, res: Response, next
     if (!barcode) {
       return res.status(400).json({
         success: false,
-        error: { message: 'Barcode string is required.', statusCode: 400 }
+        error: 'Barcode string is required.'
       });
     }
 
@@ -66,7 +66,7 @@ export const scanPackagedImage = async (req: AuthenticatedRequest, res: Response
     if (!imageBase64) {
       return res.status(400).json({
         success: false,
-        error: { message: 'Base64 image data is required.', statusCode: 400 }
+        error: 'Base64 image data is required.'
       });
     }
 
@@ -104,8 +104,14 @@ export const scanPackagedImage = async (req: AuthenticatedRequest, res: Response
         analysis
       }
     });
-  } catch (error) {
-    next(error);
+  } catch (error: any) {
+    const rawError = error?.message || String(error);
+    console.warn('[Safe Debug] Packaged scan failed:', rawError);
+    return res.status(422).json({
+      success: false,
+      error: 'Food image analysis failed. Please try again.',
+      details: rawError
+    });
   }
 };
 
@@ -117,7 +123,7 @@ export const scanMealImage = async (req: AuthenticatedRequest, res: Response, ne
     if (!imageBase64) {
       return res.status(400).json({
         success: false,
-        error: { message: 'Base64 image data is required.', statusCode: 400 }
+        error: 'Base64 image data is required.'
       });
     }
 
@@ -149,8 +155,14 @@ export const scanMealImage = async (req: AuthenticatedRequest, res: Response, ne
         mealAnalysis
       }
     });
-  } catch (error) {
-    next(error);
+  } catch (error: any) {
+    const rawError = error?.message || String(error);
+    console.warn('[Safe Debug] Meal scan failed:', rawError);
+    return res.status(422).json({
+      success: false,
+      error: 'Food image analysis failed. Please try again.',
+      details: rawError
+    });
   }
 };
 
@@ -162,7 +174,7 @@ export const scanVisualQuality = async (req: AuthenticatedRequest, res: Response
     if (!imageBase64) {
       return res.status(400).json({
         success: false,
-        error: { message: 'Base64 image data is required.', statusCode: 400 }
+        error: 'Base64 image data is required.'
       });
     }
 
@@ -192,7 +204,13 @@ export const scanVisualQuality = async (req: AuthenticatedRequest, res: Response
         qualityResult
       }
     });
-  } catch (error) {
-    next(error);
+  } catch (error: any) {
+    const rawError = error?.message || String(error);
+    console.warn('[Safe Debug] Quality scan failed:', rawError);
+    return res.status(422).json({
+      success: false,
+      error: 'Food image analysis failed. Please try again.',
+      details: rawError
+    });
   }
 };

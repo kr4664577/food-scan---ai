@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const apiKey = process.env.GEMINI_API_KEY || '';
@@ -68,14 +69,122 @@ export const SAFETY_DISCLAIMERS = {
   ESTIMATED_NUTRITION_NOTICE: "All caloric, portion, and nutrient values are estimates based on visual computer vision models."
 };
 
+export interface NormalizedImage {
+  cleanBase64: string;
+  mimeType: string;
+}
+
+/**
+ * Normalizes a Base64 input string by stripping data URI scheme (if present),
+ * extracting and preserving the MIME type, and cleaning internal whitespace.
+ */
+export function normalizeBase64Image(rawInput: string, fallbackMime: string = 'image/jpeg'): NormalizedImage {
+  if (!rawInput || typeof rawInput !== 'string') {
+    throw new Error('Food image analysis failed. Please try again.');
+  }
+
+  let str = rawInput.trim();
+  let mimeType = fallbackMime;
+
+  const match = str.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/s);
+  if (match) {
+    mimeType = match[1].toLowerCase();
+    str = match[2];
+  } else if (str.startsWith('data:')) {
+    const commaIndex = str.indexOf(',');
+    if (commaIndex !== -1) {
+      const header = str.substring(0, commaIndex);
+      const mimeMatch = header.match(/^data:([^;]+)/);
+      if (mimeMatch) {
+        mimeType = mimeMatch[1].toLowerCase();
+      }
+      str = str.substring(commaIndex + 1);
+    }
+  }
+
+  const cleanBase64 = str.replace(/\s+/g, '');
+  if (!cleanBase64) {
+    throw new Error('Food image analysis failed. Please try again.');
+  }
+
+  return { cleanBase64, mimeType };
+}
+
+/**
+ * Normalizes an image input string, whether raw Base64, data URI, or remote HTTP URL.
+ */
+export async function normalizeImageInput(
+  rawInput: string,
+  fallbackMime: string = 'image/jpeg'
+): Promise<NormalizedImage> {
+  if (!rawInput || typeof rawInput !== 'string') {
+    throw new Error('Food image analysis failed. Please try again.');
+  }
+
+  let str = rawInput.trim();
+  let mimeType = fallbackMime;
+
+  // Handle remote HTTP/HTTPS URL
+  if (str.startsWith('http://') || str.startsWith('https://')) {
+    try {
+      const cleanUrl = str.split('#')[0];
+      const response = await axios.get(cleanUrl, {
+        responseType: 'arraybuffer',
+        timeout: 10000,
+        headers: { Accept: 'image/*' }
+      });
+      const headerMime = String(response.headers['content-type'] || '');
+      if (headerMime.startsWith('image/')) {
+        mimeType = headerMime.split(';')[0].trim().toLowerCase();
+      }
+      const buffer = Buffer.from(response.data);
+      const cleanBase64 = buffer.toString('base64');
+      return { cleanBase64, mimeType };
+    } catch (urlErr: any) {
+      console.warn('[Safe Debug] Failed to fetch remote image:', urlErr?.message);
+      throw new Error('Food image analysis failed. Please try again.');
+    }
+  }
+
+  return normalizeBase64Image(rawInput, fallbackMime);
+}
+
+export function logSafeDebug(info: {
+  scanType: string;
+  mimeType: string;
+  base64Length: number;
+  geminiStatus?: string;
+  parseError?: string;
+}) {
+  console.log(`[Safe Debug] Scan Type: ${info.scanType}`);
+  console.log(`[Safe Debug] Image MIME: ${info.mimeType}, Base64 Length: ${info.base64Length} chars`);
+  if (info.geminiStatus) {
+    console.log(`[Safe Debug] Gemini Response Status: ${info.geminiStatus}`);
+  }
+  if (info.parseError) {
+    console.warn(`[Safe Debug] Parsing Error: ${info.parseError}`);
+  }
+}
+
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
+
 export const analyzePackagedFoodImage = async (
   imageBase64: string,
   mimeType: string = 'image/jpeg'
 ): Promise<PackagedAnalysisResult> => {
-  if (genAI) {
-    try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-      const prompt = `You are an expert AI food scientist. Analyze the food packaging image(s). Extract text (OCR), ingredients, nutrition facts, and additives. Return STRICT JSON with keys:
+  const normalized = await normalizeImageInput(imageBase64, mimeType);
+  logSafeDebug({
+    scanType: 'PACKAGED_FOOD',
+    mimeType: normalized.mimeType,
+    base64Length: normalized.cleanBase64.length
+  });
+
+  if (!genAI) {
+    console.error('[Safe Debug] Gemini API Key is missing');
+    throw new Error('Food image analysis failed. Please try again.');
+  }
+
+  const prompt = `You are an expert AI food scientist. Analyze the food packaging image(s). Extract text (OCR), ingredients, nutrition facts, and additives. Return STRICT JSON with keys:
 {
   "productName": "string",
   "brandName": "string",
@@ -87,59 +196,79 @@ export const analyzePackagedFoodImage = async (
   "summary": "Plain English summary of nutritional profile",
   "rawOcrText": "Extracted text string"
 }`;
-      const imagePart = { inlineData: { data: imageBase64, mimeType } };
-      const result = await model.generateContent([prompt, imagePart]);
-      const response = await result.response;
-      const text = response.text() || '';
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
+
+  const imagePart = {
+    inlineData: {
+      data: normalized.cleanBase64,
+      mimeType: normalized.mimeType
+    }
+  };
+
+  for (const modelName of GEMINI_MODELS) {
+    let attempts = 0;
+    while (attempts < 2) {
+      attempts++;
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: { responseMimeType: 'application/json' }
+        });
+        const result = await model.generateContent([prompt, imagePart]);
+        const response = await result.response;
+        const text = (response.text() || '').trim();
+
+        logSafeDebug({
+          scanType: 'PACKAGED_FOOD',
+          mimeType: normalized.mimeType,
+          base64Length: normalized.cleanBase64.length,
+          geminiStatus: `HTTP 200 OK (${modelName})`
+        });
+
+        try {
+          return JSON.parse(text);
+        } catch (e) {
+          const cleanText = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+          try {
+            return JSON.parse(cleanText);
+          } catch (e2) {
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              return JSON.parse(jsonMatch[0]);
+            }
+          }
+        }
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+        console.warn(`[Safe Debug] Gemini Vision (${modelName}, attempt ${attempts}) failed:`, errMsg);
+        if (errMsg.includes('503') || errMsg.includes('high demand')) {
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+        break;
       }
-    } catch (err) {
-      console.warn('Gemini vision call failed, using fallback parser:', err);
     }
   }
 
-  // Resilient fallback heuristic if API key is not present or offline
-  return {
-    productName: "Organic Oat & Honey Granola",
-    brandName: "Nature's Harvest",
-    nutrition: {
-      calories: 380,
-      proteins: 9.5,
-      carbs: 64,
-      fats: 11,
-      sugar: 18,
-      sodium: 140,
-      saturatedFat: 2.1
-    },
-    healthHighlights: [
-      { type: "warning", label: "High Added Sugar", description: "Contains 18g sugar per serving, which is 36% of recommended daily limit." },
-      { type: "good", label: "Good Source of Fiber", description: "Contains whole grain oats providing sustainable energy." }
-    ],
-    ingredients: ["Whole Grain Rolled Oats", "Honey", "Cane Sugar", "Sunflower Oil", "Sea Salt", "Tocopherols (E307)"],
-    detectedAllergens: ["Oats (Gluten)", "May contain traces of Tree Nuts"],
-    additives: [
-      {
-        code: "E307",
-        name: "Alpha-Tocopherol (Vitamin E)",
-        safety: "Safe",
-        explanation: "A natural antioxidant used to protect oils in food from going rancid."
-      }
-    ],
-    summary: "Nutritious whole grain granola with relatively high sugar content. Suitable as an occasional breakfast or yogurt topper.",
-    rawOcrText: "NATURE'S HARVEST ORGANIC OAT & HONEY GRANOLA - INGREDIENTS: Whole grain rolled oats, honey, cane sugar..."
-  };
+  throw new Error('Food image analysis failed. Please try again.');
 };
 
 export const analyzeMealImage = async (
   imageBase64: string,
   mimeType: string = 'image/jpeg'
 ): Promise<MealAnalysisResult> => {
-  if (genAI) {
-    try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-      const prompt = `You are an AI nutrition expert. Analyze this photo of restaurant or homemade food. Identify items, estimate portion sizes, calories, and macronutrients. Return STRICT JSON with keys:
+  const normalized = await normalizeImageInput(imageBase64, mimeType);
+  logSafeDebug({
+    scanType: 'MEAL',
+    mimeType: normalized.mimeType,
+    base64Length: normalized.cleanBase64.length
+  });
+
+  if (!genAI) {
+    console.error('[Safe Debug] Gemini API Key is missing');
+    throw new Error('Food image analysis failed. Please try again.');
+  }
+
+  const prompt = `You are an AI nutrition expert. Analyze this photo of restaurant or homemade food. Identify items, estimate portion sizes, calories, and macronutrients. Return STRICT JSON with keys:
 {
   "productName": "Main dish name",
   "items": [{ "name": "Item name", "estimatedPortion": "e.g. 150g", "calories": 250 }],
@@ -149,49 +278,79 @@ export const analyzeMealImage = async (
   "likelyIngredients": ["ingredient 1", "ingredient 2"],
   "healthSummary": "High protein balanced meal with moderate carbs."
 }`;
-      const imagePart = { inlineData: { data: imageBase64, mimeType } };
-      const result = await model.generateContent([prompt, imagePart]);
-      const response = await result.response;
-      const text = response.text() || '';
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
+
+  const imagePart = {
+    inlineData: {
+      data: normalized.cleanBase64,
+      mimeType: normalized.mimeType
+    }
+  };
+
+  for (const modelName of GEMINI_MODELS) {
+    let attempts = 0;
+    while (attempts < 2) {
+      attempts++;
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: { responseMimeType: 'application/json' }
+        });
+        const result = await model.generateContent([prompt, imagePart]);
+        const response = await result.response;
+        const text = (response.text() || '').trim();
+
+        logSafeDebug({
+          scanType: 'MEAL',
+          mimeType: normalized.mimeType,
+          base64Length: normalized.cleanBase64.length,
+          geminiStatus: `HTTP 200 OK (${modelName})`
+        });
+
+        try {
+          return JSON.parse(text);
+        } catch (e) {
+          const cleanText = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+          try {
+            return JSON.parse(cleanText);
+          } catch (e2) {
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              return JSON.parse(jsonMatch[0]);
+            }
+          }
+        }
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+        console.warn(`[Safe Debug] Gemini Meal Vision (${modelName}, attempt ${attempts}) failed:`, errMsg);
+        if (errMsg.includes('503') || errMsg.includes('high demand')) {
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+        break;
       }
-    } catch (err) {
-      console.warn('Gemini meal analysis call failed, using fallback:', err);
     }
   }
 
-  // Resilient fallback heuristic
-  return {
-    productName: "Grilled Salmon Bowl with Quinoa & Roasted Veggies",
-    items: [
-      { name: "Grilled Salmon Filet", estimatedPortion: "160g", calories: 330 },
-      { name: "Cooked Quinoa", estimatedPortion: "120g", calories: 145 },
-      { name: "Roasted Broccoli & Carrots", estimatedPortion: "100g", calories: 65 }
-    ],
-    nutrition: {
-      totalCalories: 540,
-      proteins: 38,
-      carbs: 42,
-      fats: 22,
-      fiber: 7
-    },
-    confidenceScore: 0.89,
-    estimationDisclaimer: SAFETY_DISCLAIMERS.ESTIMATED_NUTRITION_NOTICE,
-    likelyIngredients: ["Atlantic Salmon", "Quinoa", "Broccoli", "Carrots", "Olive Oil", "Lemon Juice", "Black Pepper"],
-    healthSummary: "Excellent high-protein, omega-3 rich meal with fiber-rich complex carbohydrates."
-  };
+  throw new Error('Food image analysis failed. Please try again.');
 };
 
 export const analyzeVisualQualityImage = async (
   imageBase64: string,
   mimeType: string = 'image/jpeg'
 ): Promise<QualityAnalysisResult> => {
-  if (genAI) {
-    try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-      const prompt = `You are an AI visual food quality inspector. Check ONLY visible signs of spoilage (mold, unusual discoloration, foreign objects, packaging tearing/dents).
+  const normalized = await normalizeImageInput(imageBase64, mimeType);
+  logSafeDebug({
+    scanType: 'QUALITY_INSPECTION',
+    mimeType: normalized.mimeType,
+    base64Length: normalized.cleanBase64.length
+  });
+
+  if (!genAI) {
+    console.error('[Safe Debug] Gemini API Key is missing');
+    throw new Error('Food image analysis failed. Please try again.');
+  }
+
+  const prompt = `You are an AI visual food quality inspector. Check ONLY visible signs of spoilage (mold, unusual discoloration, foreign objects, packaging tearing/dents).
 IMPORTANT: NEVER claim food is definitely safe, hygienic, or free from invisible bacteria/toxins.
 Return STRICT JSON:
 {
@@ -201,32 +360,70 @@ Return STRICT JSON:
   "safetyDisclaimer": "Standard disclaimer text",
   "assessmentNotes": "Observation notes"
 }`;
-      const imagePart = { inlineData: { data: imageBase64, mimeType } };
-      const result = await model.generateContent([prompt, imagePart]);
-      const response = await result.response;
-      const text = response.text() || '';
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const res = JSON.parse(jsonMatch[0]);
-        if (res.status === 'NO_OBVIOUS_ISSUES') {
-          res.safetyDisclaimer = SAFETY_DISCLAIMERS.NO_VISIBLE_ISSUES;
-        } else if (res.status === 'POSSIBLE_ISSUE_DETECTED') {
-          res.safetyDisclaimer = SAFETY_DISCLAIMERS.POSSIBLE_ISSUE;
-        } else {
-          res.safetyDisclaimer = SAFETY_DISCLAIMERS.UNABLE_TO_DETERMINE;
+
+  const imagePart = {
+    inlineData: {
+      data: normalized.cleanBase64,
+      mimeType: normalized.mimeType
+    }
+  };
+
+  for (const modelName of GEMINI_MODELS) {
+    let attempts = 0;
+    while (attempts < 2) {
+      attempts++;
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: { responseMimeType: 'application/json' }
+        });
+        const result = await model.generateContent([prompt, imagePart]);
+        const response = await result.response;
+        const text = (response.text() || '').trim();
+
+        logSafeDebug({
+          scanType: 'QUALITY_INSPECTION',
+          mimeType: normalized.mimeType,
+          base64Length: normalized.cleanBase64.length,
+          geminiStatus: `HTTP 200 OK (${modelName})`
+        });
+
+        let res: any = null;
+        try {
+          res = JSON.parse(text);
+        } catch (e) {
+          const cleanText = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+          try {
+            res = JSON.parse(cleanText);
+          } catch (e2) {
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              res = JSON.parse(jsonMatch[0]);
+            }
+          }
         }
-        return res;
+
+        if (res) {
+          if (res.status === 'NO_OBVIOUS_ISSUES') {
+            res.safetyDisclaimer = SAFETY_DISCLAIMERS.NO_VISIBLE_ISSUES;
+          } else if (res.status === 'POSSIBLE_ISSUE_DETECTED') {
+            res.safetyDisclaimer = SAFETY_DISCLAIMERS.POSSIBLE_ISSUE;
+          } else {
+            res.safetyDisclaimer = SAFETY_DISCLAIMERS.UNABLE_TO_DETERMINE;
+          }
+          return res;
+        }
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+        console.warn(`[Safe Debug] Gemini Quality Vision (${modelName}, attempt ${attempts}) failed:`, errMsg);
+        if (errMsg.includes('503') || errMsg.includes('high demand')) {
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+        break;
       }
-    } catch (err) {
-      console.warn('Gemini visual quality call failed, using fallback:', err);
     }
   }
 
-  return {
-    status: 'NO_OBVIOUS_ISSUES',
-    confidenceScore: 0.91,
-    visibleIssues: [],
-    safetyDisclaimer: SAFETY_DISCLAIMERS.NO_VISIBLE_ISSUES,
-    assessmentNotes: "Image inspected: Fresh appearance, uniform coloration, undamaged packaging texture."
-  };
+  throw new Error('Food image analysis failed. Please try again.');
 };

@@ -38,47 +38,22 @@ export const MealReportScreen: React.FC = () => {
   const [newItemCalories, setNewItemCalories] = useState(120);
   const [isChatOpen, setIsChatOpen] = useState(false);
 
-  const report = activeMealReport || {
-    detectedDishName: "Whole Wheat Rotis with Spiced Vegetable Bhaji",
-    items: [
-      {
-        name: "Whole Wheat Rotis (Chapatis)",
-        estimatedPortion: "2 Rotis (~70g)",
-        confidence: 0.96,
-        isEstimated: true,
-        dataSource: "Visual Texture & User Input Match",
-        nutrition: { calories: 160, protein: 6, carbs: 30, fat: 2, fiber: 4, sugar: 0, sodium: 120 }
-      },
-      {
-        name: "Mixed Vegetable Bhaji / Sabzi Gravy",
-        estimatedPortion: "1 Bowl (~150g)",
-        confidence: 0.94,
-        isEstimated: true,
-        dataSource: "Color Spectrum Engine",
-        nutrition: { calories: 180, protein: 5, carbs: 18, fat: 10, fiber: 5, sugar: 4, sodium: 380 }
-      }
-    ],
-    totalNutrition: {
-      calories: 340,
-      protein: 11,
-      carbs: 48,
-      fat: 12,
-      fiber: 9,
-      sugar: 4,
-      sodium: 500
-    },
-    confidence: {
-      itemsRecognition: 0.95,
-      portionVolume: 0.90,
-      totalNutrition: 0.92,
-      overall: 0.92
-    },
-    isEstimated: true,
-    primaryDataSource: "FoodScan AI Multi-Item Engine",
-    estimationDisclaimer: "All caloric, portion, and nutrient values are visual AI estimations based on computer vision volume heuristics and food database references.",
-    likelyIngredients: ["Whole Wheat Flour (Atta)", "Potatoes & Mixed Veggies", "Tomatoes", "Onions", "Sunflower Oil / Ghee"],
-    healthSummary: "Wholesome traditional meal combining complex carbohydrates from whole wheat rotis with vital vitamins from vegetable bhaji."
-  };
+  if (!activeMealReport) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 text-center">
+        <h3 className="text-base font-bold text-slate-800 mb-2">No Active Meal Report</h3>
+        <p className="text-xs text-slate-500 mb-6">Scan a homemade or restaurant meal to see item breakdown & macros.</p>
+        <button
+          onClick={() => setScreen('CAMERA')}
+          className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow transition"
+        >
+          Open Scanner
+        </button>
+      </div>
+    );
+  }
+
+  const report = activeMealReport;
 
   const dishTitle = report.detectedDishName || "Scanned Meal";
   const totals = report.totalNutrition || { calories: 340, protein: 11, carbs: 48, fat: 12, fiber: 9, sugar: 4, sodium: 500 };

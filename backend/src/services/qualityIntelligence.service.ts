@@ -67,14 +67,24 @@ export interface IVisualQualityModelEngine {
 /**
  * Gemini Multi-Modal Implementation of IVisualQualityModelEngine
  */
+import { normalizeBase64Image, logSafeDebug } from './ai.service';
+
 export class GeminiQualityModelEngine implements IVisualQualityModelEngine {
   providerName = "Gemini Multi-Modal Vision Quality Engine (Pluggable CV Architecture)";
 
   async analyze(imageBase64: string, mimeType: string = 'image/jpeg'): Promise<QualityIntelligenceResult> {
-    if (genAI && imageBase64) {
-      try {
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-        const prompt = `You are a certified AI visual food quality inspector.
+    if (!genAI || !imageBase64) {
+      throw new Error('Food image analysis failed. Please try again.');
+    }
+
+    const { cleanBase64, mimeType: finalMimeType } = normalizeBase64Image(imageBase64, mimeType);
+    logSafeDebug({
+      scanType: 'QUALITY_INSPECTION',
+      mimeType: finalMimeType,
+      base64Length: cleanBase64.length
+    });
+
+    const prompt = `You are a certified AI visual food quality inspector.
 Analyze ONLY visually observable surface issues.
 Possible categories:
 - Mold-like appearance (MOLD_LIKE_APPEARANCE)
@@ -107,36 +117,43 @@ Return STRICT JSON ONLY (no markdown codeblock) matching schema:
   "assessmentNotes": "Observation summary notes"
 }`;
 
-        const cleanBase64 = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
-        const imagePart = { inlineData: { data: cleanBase64, mimeType } };
+    const imagePart = { inlineData: { data: cleanBase64, mimeType: finalMimeType } };
+    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash'];
+
+    for (const modelName of modelsToTry) {
+      try {
+        const model = genAI.getGenerativeModel({ model: modelName });
         const result = await model.generateContent([prompt, imagePart]);
         const response = await result.response;
         const text = response.text() || '';
+
+        logSafeDebug({
+          scanType: 'QUALITY_INSPECTION',
+          mimeType: finalMimeType,
+          base64Length: cleanBase64.length,
+          geminiStatus: `HTTP 200 OK (${modelName})`
+        });
+
         const jsonMatch = text.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          return this.formatAndSanitizeResult(parsed);
+          try {
+            const parsed = JSON.parse(jsonMatch[0]);
+            return this.formatAndSanitizeResult(parsed);
+          } catch (parseErr: any) {
+            logSafeDebug({
+              scanType: 'QUALITY_INSPECTION',
+              mimeType: finalMimeType,
+              base64Length: cleanBase64.length,
+              parseError: parseErr.message
+            });
+          }
         }
-      } catch (err) {
-        console.warn("Gemini visual quality engine execution error:", err);
+      } catch (err: any) {
+        console.warn(`[Safe Debug] Gemini Quality Vision (${modelName}) failed:`, err.message || err);
       }
     }
 
-    // Resilient fallback quality inspection engine
-    return this.formatAndSanitizeResult({
-      statusCategory: "No obvious visible issue detected",
-      overallConfidence: 0.91,
-      detectedIssues: [
-        {
-          issue_type: "NONE",
-          confidence: 0.91,
-          affected_area: "Entire visible food surface & packaging exterior",
-          explanation: "Uniform surface coloration, fresh texture, no visible mold spores or structural packaging tears detected.",
-          limitations: "Visual optical evaluation cannot assess internal temperature, microbial pathogens, or chemical toxins."
-        }
-      ],
-      assessmentNotes: "Optical surface scan complete. No visible mold, discoloration, or packaging integrity defects observed."
-    });
+    throw new Error('Food image analysis failed. Please try again.');
   }
 
   private formatAndSanitizeResult(raw: any): QualityIntelligenceResult {

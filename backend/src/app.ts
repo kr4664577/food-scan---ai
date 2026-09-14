@@ -29,15 +29,19 @@ const limiter = rateLimit({
 });
 app.use('/api', limiter);
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
+// Health check endpoints (supports /, /health, /api, and /api/health)
+const healthHandler = (req: any, res: any) => {
   res.status(200).json({
     status: 'OK',
     service: 'FoodScan AI Backend API',
     timestamp: new Date().toISOString(),
     version: '1.0.0'
   });
-});
+};
+app.get('/', healthHandler);
+app.get('/health', healthHandler);
+app.get('/api', healthHandler);
+app.get('/api/health', healthHandler);
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -49,8 +53,8 @@ app.use('/api/chat', chatRoutes);
 // Global Error Handler (Adheres to KI Error Handling Guidelines)
 app.use(errorHandler);
 
-app.listen(PORT, async () => {
-  console.log(`🚀 FoodScan AI Backend API running on http://localhost:${PORT}`);
+app.listen(Number(PORT), '0.0.0.0', async () => {
+  console.log(`🚀 FoodScan AI Backend API running on http://0.0.0.0:${PORT} (LAN: http://192.168.31.218:${PORT})`);
   await seedFoodDatabase();
 });
 

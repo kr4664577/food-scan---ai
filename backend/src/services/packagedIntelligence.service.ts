@@ -301,7 +301,14 @@ CRITICAL REQUIREMENT: Return STRICT JSON ONLY (no markdown formatting, no plain 
   "uncertaintyWarnings": []
 }`;
 
-    ocrResult = await runUnifiedVisionAnalysis({ prompt, imageBase64, mimeType });
+    ocrResult = await runUnifiedVisionAnalysis({ prompt, imageBase64, mimeType, scanType: 'PACKAGED' });
+    if (!ocrResult || !ocrResult.productName) {
+      throw new Error('Food image analysis failed. Please try again.');
+    }
+  }
+
+  if (!dbData && !ocrResult && !barcode) {
+    throw new Error('Food image analysis failed. Please try again.');
   }
 
   return mergeAndNormalizePackagedData({
@@ -327,31 +334,31 @@ const mergeAndNormalizePackagedData = (input: {
 
   const rawQuery = (customItemName || ocrResult?.productName || dbData?.productName || '').toLowerCase().trim();
 
-  // Match against Catalog Index
-  const matchedCatalog = BRAND_PRODUCT_CATALOG.find(cat =>
+  // Match against Catalog Index if query matches
+  const matchedCatalog = rawQuery ? BRAND_PRODUCT_CATALOG.find(cat =>
     cat.keywords.some(kw => rawQuery.includes(kw))
-  );
-
-  let productName = customItemName || matchedCatalog?.productName || ocrResult?.productName || dbData?.productName || 'Britannia Good Day Butter Cookies';
-  let brandName = matchedCatalog?.brandName || ocrResult?.brandName || dbData?.brandName || 'Britannia Industries';
-  let productNameSource: DataSourceType = matchedCatalog ? 'EXTERNAL_DATABASE' : (ocrResult?.productName ? 'PACKAGE_OCR' : (dbData?.productName ? 'EXTERNAL_DATABASE' : 'AI_ESTIMATE'));
-  let nameConfidence = matchedCatalog ? 0.98 : (ocrResult?.confidence?.productName || 0.92);
+  ) : undefined;
+  let productName = customItemName || ocrResult?.productName || dbData?.productName;
+  if (!productName) {
+    throw new Error('Food image analysis failed. Please try again.');
+  }
+  let brandName = ocrResult?.brandName || dbData?.brandName || matchedCatalog?.brandName || 'Food Brand';
+  let productNameSource: DataSourceType = ocrResult?.productName ? 'PACKAGE_OCR' : (dbData?.productName ? 'EXTERNAL_DATABASE' : 'AI_ESTIMATE');
+  let nameConfidence = ocrResult?.confidence?.productName || (matchedCatalog ? 0.98 : 0.92);
 
   const nutrition = {
-    calories: ocrResult?.nutrition?.calories ?? dbData?.calories ?? matchedCatalog?.calories ?? 440,
-    proteins: ocrResult?.nutrition?.proteins ?? dbData?.proteins ?? matchedCatalog?.proteins ?? 6.5,
-    carbs: ocrResult?.nutrition?.carbs ?? dbData?.carbs ?? matchedCatalog?.carbs ?? 64,
-    fats: ocrResult?.nutrition?.fats ?? dbData?.fats ?? matchedCatalog?.fats ?? 18,
-    sugar: ocrResult?.nutrition?.sugar ?? dbData?.sugar ?? matchedCatalog?.sugar ?? 22,
-    sodium: ocrResult?.nutrition?.sodium ?? dbData?.sodium ?? matchedCatalog?.sodium ?? 280,
-    saturatedFat: ocrResult?.nutrition?.saturatedFat ?? dbData?.saturatedFat ?? matchedCatalog?.saturatedFat ?? 8.5
+    calories: ocrResult?.nutrition?.calories ?? dbData?.calories ?? matchedCatalog?.calories ?? 0,
+    proteins: ocrResult?.nutrition?.proteins ?? dbData?.proteins ?? matchedCatalog?.proteins ?? 0,
+    carbs: ocrResult?.nutrition?.carbs ?? dbData?.carbs ?? matchedCatalog?.carbs ?? 0,
+    fats: ocrResult?.nutrition?.fats ?? dbData?.fats ?? matchedCatalog?.fats ?? 0,
+    sugar: ocrResult?.nutrition?.sugar ?? dbData?.sugar ?? matchedCatalog?.sugar ?? 0,
+    sodium: ocrResult?.nutrition?.sodium ?? dbData?.sodium ?? matchedCatalog?.sodium ?? 0,
+    saturatedFat: ocrResult?.nutrition?.saturatedFat ?? dbData?.saturatedFat ?? matchedCatalog?.saturatedFat ?? 0
   };
 
-  let ingredients = ocrResult?.ingredients || dbData?.ingredientsList || matchedCatalog?.ingredients || [
-    "Whole Wheat Flour (Atta 58%)", "Sugar", "Edible Vegetable Oil (Palm)", "Butter (4%)", "Invert Sugar Syrup", "Milk Solids", "Raising Agents (E500ii, E503ii)", "Emulsifier (Soy Lecithin E322)", "Iodised Salt"
-  ];
+  let ingredients = ocrResult?.ingredients || dbData?.ingredientsList || matchedCatalog?.ingredients || [];
 
-  let detectedAllergens = ocrResult?.detectedAllergens || dbData?.detectedAllergens || matchedCatalog?.allergens || ['Wheat (Gluten)', 'Milk / Dairy', 'Soy'];
+  let detectedAllergens = ocrResult?.detectedAllergens || dbData?.detectedAllergens || matchedCatalog?.allergens || [];
 
   // Calculate TruthRating (0.0 to 5.0 Stars)
   let rawTruthScore = matchedCatalog?.truthScore || 3.2;

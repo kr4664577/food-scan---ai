@@ -3,7 +3,10 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const config: CapacitorConfig = {
   appId: 'com.foodscan.ai',
   appName: 'FoodScan AI',
-  webDir: 'dist'
+  webDir: 'dist',
+  server: {
+    cleartext: true
+  }
 };
 
 export default config;

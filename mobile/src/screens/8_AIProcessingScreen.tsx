@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import { Scan, Sparkles, ShieldCheck, Cpu } from 'lucide-react';
+import { Scan, Sparkles, ShieldCheck, Cpu, AlertTriangle, ArrowLeft, RefreshCw } from 'lucide-react';
 
 export const AIProcessingScreen: React.FC = () => {
-  const { isLoading, currentScreen } = useAppStore();
+  const { isLoading, errorMessage, setScreen } = useAppStore();
   const [stage, setStage] = useState(0);
 
   const stages = [
@@ -19,6 +19,38 @@ export const AIProcessingScreen: React.FC = () => {
     }, 800);
     return () => clearInterval(timer);
   }, []);
+
+  if (errorMessage && !isLoading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-950 text-center relative overflow-hidden">
+        <div className="absolute w-80 h-80 bg-rose-500/10 rounded-full blur-3xl" />
+
+        <div className="w-20 h-20 rounded-3xl bg-rose-950/60 border border-rose-500/40 flex items-center justify-center text-rose-400 mb-6 shadow-2xl shadow-rose-900/40">
+          <AlertTriangle size={36} />
+        </div>
+
+        <h2 className="text-xl font-bold text-white mb-2">Analysis Failed</h2>
+        <p className="text-sm text-rose-300 font-medium mb-8 max-w-xs leading-relaxed">
+          {errorMessage}
+        </p>
+
+        <div className="flex flex-col gap-3 w-full max-w-xs">
+          <button
+            onClick={() => setScreen('IMAGE_PREVIEW')}
+            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition"
+          >
+            <RefreshCw size={18} /> Try Again
+          </button>
+          <button
+            onClick={() => setScreen('CAMERA')}
+            className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold rounded-2xl border border-slate-800 flex items-center justify-center gap-2 transition"
+          >
+            <ArrowLeft size={16} /> Take New Photo
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-950 text-center relative overflow-hidden">

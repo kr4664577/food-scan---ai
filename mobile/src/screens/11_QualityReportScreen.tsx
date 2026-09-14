@@ -6,22 +6,22 @@ import { QualityResultCategory } from '../types';
 export const QualityReportScreen: React.FC = () => {
   const { activeQualityReport, setScreen } = useAppStore();
 
-  const report = activeQualityReport || {
-    statusCategory: 'No obvious visible issue detected' as QualityResultCategory,
-    overallConfidence: 0.91,
-    detectedIssues: [
-      {
-        issue_type: 'NONE' as const,
-        confidence: 0.91,
-        affected_area: 'Visible food surface and packaging seal area',
-        explanation: 'Fresh appearance, uniform coloration, undamaged packaging texture.',
-        limitations: 'Optical surface checks cannot evaluate internal microbial safety, toxins, or pathogens.'
-      }
-    ],
-    mandatoryDisclaimer: "CRITICAL SAFETY WARNING: Visual image analysis evaluates surface optical indicators only. It CANNOT detect invisible microorganisms (such as Salmonella, E. coli, Botulinum), bacterial toxins, viral pathogens, or chemical contamination. Always follow standard food safety and hygiene guidelines.",
-    assessmentNotes: "Image inspected: Fresh color, uniform skin texture, no visible surface mold or packaging tears.",
-    modelEngineProvider: "Gemini Multi-Modal Vision Quality Engine (Pluggable CV Architecture)"
-  };
+  if (!activeQualityReport) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 text-center">
+        <h3 className="text-base font-bold text-slate-800 mb-2">No Active Quality Report</h3>
+        <p className="text-xs text-slate-500 mb-6">Scan food to inspect visible quality and freshness indicators.</p>
+        <button
+          onClick={() => setScreen('CAMERA')}
+          className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow transition"
+        >
+          Open Scanner
+        </button>
+      </div>
+    );
+  }
+
+  const report = activeQualityReport;
 
   const statusCategory: string = report.statusCategory || (report as any).status || 'No obvious visible issue detected';
   const confidence = report.overallConfidence || (report as any).confidenceScore || 0.91;

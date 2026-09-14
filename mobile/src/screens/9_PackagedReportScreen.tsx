@@ -9,70 +9,22 @@ export const PackagedReportScreen: React.FC = () => {
   const [isSaved, setIsSaved] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
 
-  const report = activePackagedReport || {
-    productName: "Britannia Good Day Butter Cookies",
-    brandName: "Britannia Industries",
-    nutrition: {
-      calories: 480,
-      proteins: 6.0,
-      carbs: 66,
-      fats: 22,
-      sugar: 24,
-      sodium: 260,
-      saturatedFat: 11
-    },
-    truthRating: {
-      score: 2.8,
-      maxScore: 5.0,
-      ratingLabel: "Ultra-Processed Warning",
-      ratingColor: "text-amber-700 bg-amber-50 border-amber-300"
-    },
-    novaGroup: {
-      level: 4,
-      label: "NOVA 4: Ultra-Processed Food",
-      description: "Industrial bakery item with refined wheat flour, added sugar, and palm oil.",
-      badgeColor: "bg-rose-600 text-white"
-    },
-    trafficLight: {
-      overallStatus: "RED",
-      sugarStatus: "RED",
-      sodiumStatus: "GREEN",
-      fatStatus: "YELLOW"
-    },
-    healthierSwaps: [
-      {
-        name: "Organic Whole Grain Oats Cookies",
-        brand: "NutriChoice Clean",
-        calories: 320,
-        rating: 4.6,
-        reason: "70% less added sugar & zero palm oil."
-      },
-      {
-        name: "Roasted Multigrain Makhana / Foxnuts",
-        brand: "Farm Fresh",
-        calories: 180,
-        rating: 4.8,
-        reason: "High protein & zero ultra-processed fats."
-      }
-    ],
-    hiddenIngredientsAlert: {
-      hiddenSugars: ["Invert Sugar Syrup", "Sugar"],
-      cheapOils: ["Edible Vegetable Oil (Palm)"]
-    },
-    healthHighlights: [
-      { type: "warning", label: "Added Sugar & Palm Oil", description: "Contains 24g sugar and refined palm oil." },
-      { type: "info", label: "NOVA 4 Ultra-Processed", description: "Industrial formulated cookie item." }
-    ],
-    ingredients: ["Refined Wheat Flour (Maida)", "Sugar", "Edible Vegetable Oil (Palm)", "Butter (3%)", "Invert Sugar Syrup", "Milk Solids", "Raising Agents (E500ii, E503ii)", "Emulsifier (Soy Lecithin E322)", "Iodised Salt"],
-    detectedAllergens: ["Wheat (Gluten)", "Milk / Dairy", "Soy"],
-    additives: [
-      { code: "E500ii", name: "Sodium Hydrogen Carbonate (Baking Soda)", safety: "Safe", explanation: "Baking soda used as a raising agent in baked goods." },
-      { code: "E322", name: "Soy Lecithin", safety: "Safe", explanation: "Natural emulsifier maintaining consistent dough texture." }
-    ],
-    summary: "Britannia Good Day Butter Cookies. Truth Rating 2.8/5.0. Formulated with refined wheat flour, added sugar, and palm oil.",
-    rawOcrText: "BRITANNIA GOOD DAY BUTTER COOKIES - INGREDIENTS: Refined Wheat Flour, Sugar, Palm Oil, Butter...",
-    nutritionScore: "D"
-  };
+  if (!activePackagedReport) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 text-center">
+        <h3 className="text-base font-bold text-slate-800 mb-2">No Active Packaged Report</h3>
+        <p className="text-xs text-slate-500 mb-6">Scan a packaged food product to see its nutritional analysis.</p>
+        <button
+          onClick={() => setScreen('CAMERA')}
+          className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow transition"
+        >
+          Open Scanner
+        </button>
+      </div>
+    );
+  }
+
+  const report = activePackagedReport;
 
   const truthScore = report.truthRating?.score || 2.8;
 
