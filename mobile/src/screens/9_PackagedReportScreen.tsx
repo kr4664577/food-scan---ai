@@ -2,12 +2,20 @@ import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { AlertTriangle, CheckCircle2, Heart, ShieldAlert, Sparkles, FileText, Camera, Star, ArrowRight, Info, AlertOctagon, Flame, Bot } from 'lucide-react';
 import { AIChatbotModal } from '../components/AIChatbotModal';
+import { apiClient } from '../api/client';
 
 export const PackagedReportScreen: React.FC = () => {
   const { activePackagedReport, setScreen } = useAppStore();
   const [showOcr, setShowOcr] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [feedbackState, setFeedbackState] = useState<'idle' | 'correct' | 'reporting' | 'submitted'>('idle');
+  const [feedbackType, setFeedbackType] = useState('WRONG_PRODUCT');
+  const [correctedName, setCorrectedName] = useState('');
+  const [correctedBrand, setCorrectedBrand] = useState('');
+  const [comment, setComment] = useState('');
+  const [feedbackError, setFeedbackError] = useState('');
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
 
   if (!activePackagedReport) {
     return (
@@ -25,8 +33,32 @@ export const PackagedReportScreen: React.FC = () => {
   }
 
   const report = activePackagedReport;
-
   const truthScore = report.truthRating?.score || 2.8;
+
+  const submitFeedback = async () => {
+    setFeedbackError('');
+    const scanId = (report as any).scanId || (report as any).id;
+    if (!scanId) {
+      setFeedbackError('This scan is not linked to history yet. Please sign in and scan again.');
+      return;
+    }
+    setFeedbackSubmitting(true);
+    try {
+      const response = await apiClient.post('/feedback', {
+        scanId,
+        feedbackType,
+        correctedName: correctedName.trim() || undefined,
+        correctedBrand: correctedBrand.trim() || undefined,
+        comment: comment.trim() || undefined,
+      });
+      if (!response.data?.success) throw new Error(response.data?.error?.message || 'Could not submit feedback.');
+      setFeedbackState('submitted');
+    } catch (error: any) {
+      setFeedbackError(error.response?.data?.error?.message || 'Could not submit feedback. Please sign in and try again.');
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  };
 
   return (
     <div className="pb-28 pt-4 px-4 space-y-4 max-w-md mx-auto">
@@ -38,28 +70,18 @@ export const PackagedReportScreen: React.FC = () => {
               <AlertOctagon size={22} className="shrink-0 text-white" />
               <h4 className="text-xs font-black uppercase tracking-wider">Unhealthy Food Rating ({truthScore} / 5.0 ⭐)</h4>
             </div>
-            <span className="text-[9px] font-black bg-white/20 border border-white/30 px-2 py-0.5 rounded-full uppercase">
-              Poor Score
-            </span>
+            <span className="text-[9px] font-black bg-white/20 border border-white/30 px-2 py-0.5 rounded-full uppercase">Poor Score</span>
           </div>
-          <p className="text-[11px] text-white/90 leading-relaxed font-medium">
-            This food has an ultra-processed score due to high added sugars and refined oils. We recommend picking a healthier clean choice below!
-          </p>
-
-          {/* Instant Healthy Swap Shortcut */}
+          <p className="text-[11px] text-white/90 leading-relaxed font-medium">This food has an ultra-processed score due to high added sugars and refined oils. We recommend picking a healthier clean choice below!</p>
           {report.healthierSwaps && report.healthierSwaps.length > 0 && (
             <div className="p-3 bg-white text-slate-900 rounded-2xl border border-rose-200 shadow-md">
-              <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider block mb-1">
-                🌟 Recommended Healthy Swap:
-              </span>
+              <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider block mb-1">🌟 Recommended Healthy Swap:</span>
               <div className="flex items-center justify-between">
                 <div>
                   <h5 className="text-xs font-black text-slate-900">{report.healthierSwaps[0].name}</h5>
                   <p className="text-[10px] text-slate-600">{report.healthierSwaps[0].brand} • {report.healthierSwaps[0].reason}</p>
                 </div>
-                <span className="text-xs font-black bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-xl border border-emerald-300 shrink-0">
-                  ⭐ {report.healthierSwaps[0].rating}
-                </span>
+                <span className="text-xs font-black bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-xl border border-emerald-300 shrink-0">⭐ {report.healthierSwaps[0].rating}</span>
               </div>
             </div>
           )}
@@ -71,24 +93,13 @@ export const PackagedReportScreen: React.FC = () => {
         <div className="flex items-start justify-between mb-3">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-[11px] font-black text-emerald-800 uppercase tracking-wider block">
-                {report.brandName || 'Brand Product'}
-              </span>
-              <span className="text-[9px] font-black bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full uppercase">
-                Verified Product Name
-              </span>
+              <span className="text-[11px] font-black text-emerald-800 uppercase tracking-wider block">{report.brandName || 'Brand Product'}</span>
+              <span className="text-[9px] font-black bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full uppercase">Verified Product Name</span>
             </div>
-            <h2 className="text-xl font-black text-slate-900 leading-tight">
-              {report.productName}
-            </h2>
+            <h2 className="text-xl font-black text-slate-900 leading-tight">{report.productName}</h2>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsSaved(!isSaved)}
-              className={`w-9 h-9 rounded-full border flex items-center justify-center transition ${
-                isSaved ? 'bg-rose-500 text-white border-rose-400' : 'bg-slate-100 text-slate-500 border-slate-200 hover:text-slate-900'
-              }`}
-            >
+            <button onClick={() => setIsSaved(!isSaved)} className={`w-9 h-9 rounded-full border flex items-center justify-center transition ${isSaved ? 'bg-rose-500 text-white border-rose-400' : 'bg-slate-100 text-slate-500 border-slate-200 hover:text-slate-900'}`}>
               <Heart size={18} className={isSaved ? 'fill-current' : ''} />
             </button>
           </div>
@@ -97,212 +108,86 @@ export const PackagedReportScreen: React.FC = () => {
         {/* TruthIn 0.0 to 5.0 Star Rating Banner */}
         <div className="mt-3 p-3.5 rounded-2xl bg-gradient-to-r from-slate-900 to-slate-800 text-white flex items-center justify-between shadow-md">
           <div>
-            <span className="text-[10px] font-black uppercase text-amber-400 tracking-wider block">
-              TruthIn Rating System (TIRS)
-            </span>
+            <span className="text-[10px] font-black uppercase text-amber-400 tracking-wider block">TruthIn Rating System (TIRS)</span>
             <div className="flex items-center gap-1 mt-0.5">
               <span className="text-xl font-black text-white">{truthScore}</span>
               <span className="text-xs text-slate-400 font-bold">/ 5.0</span>
-              <div className="flex text-amber-400 ml-1">
-                {[1, 2, 3, 4, 5].map((s) => (
-                  <Star
-                    key={s}
-                    size={14}
-                    className={s <= Math.floor(truthScore) ? 'fill-amber-400 text-amber-400' : 'text-slate-600'}
-                  />
-                ))}
-              </div>
+              <div className="flex text-amber-400 ml-1">{[1,2,3,4,5].map(s => <Star key={s} size={14} className={s <= Math.floor(truthScore) ? 'fill-amber-400 text-amber-400' : 'text-slate-600'} />)}</div>
             </div>
-            <span className="text-[10px] text-slate-300 font-medium block mt-0.5">
-              {report.truthRating?.ratingLabel || 'Product Intelligence Score'}
-            </span>
+            <span className="text-[10px] text-slate-300 font-medium block mt-0.5">{report.truthRating?.ratingLabel || 'Product Intelligence Score'}</span>
           </div>
-
-          {/* NOVA Classification Badge */}
-          {report.novaGroup && (
-            <div className={`px-3 py-1.5 rounded-xl font-black text-xs shadow text-center border border-white/20 ${report.novaGroup.badgeColor}`}>
-              <span className="block text-[9px] opacity-90 uppercase">Processing</span>
-              {report.novaGroup.label.split(':')[0]}
-            </div>
-          )}
+          {report.novaGroup && <div className={`px-3 py-1.5 rounded-xl font-black text-xs shadow text-center border border-white/20 ${report.novaGroup.badgeColor}`}><span className="block text-[9px] opacity-90 uppercase">Processing</span>{report.novaGroup.label.split(':')[0]}</div>}
         </div>
-
-        <p className="text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-3 mt-3">
-          {report.summary}
-        </p>
+        <p className="text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-3 mt-3">{report.summary}</p>
       </div>
 
-      {/* TruthIn Feature 1: Personalized Traffic Light Safety Matrix */}
+      {/* Traffic Light Matrix */}
       {report.trafficLight && (
         <div className="food-card p-4 rounded-3xl bg-white border border-slate-200 space-y-2.5">
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wider">Personalized Traffic Light Matrix</h3>
           <div className="grid grid-cols-3 gap-2 text-center">
-            <div className={`p-2.5 rounded-2xl border font-bold text-xs ${
-              report.trafficLight.sugarStatus === 'RED' ? 'bg-rose-50 border-rose-200 text-rose-800' : (report.trafficLight.sugarStatus === 'YELLOW' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800')
-            }`}>
-              <span className="text-[9px] block uppercase opacity-80">Added Sugar</span>
-              <strong className="text-sm font-black">{report.nutrition.sugar}g</strong>
-              <span className="text-[9px] block font-black mt-0.5">{report.trafficLight.sugarStatus === 'RED' ? '🔴 High Risk' : '🟢 Safe'}</span>
-            </div>
-
-            <div className={`p-2.5 rounded-2xl border font-bold text-xs ${
-              report.trafficLight.fatStatus === 'RED' ? 'bg-rose-50 border-rose-200 text-rose-800' : (report.trafficLight.fatStatus === 'YELLOW' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800')
-            }`}>
-              <span className="text-[9px] block uppercase opacity-80">Sat. Fat</span>
-              <strong className="text-sm font-black">{report.nutrition.saturatedFat}g</strong>
-              <span className="text-[9px] block font-black mt-0.5">{report.trafficLight.fatStatus === 'YELLOW' ? '🟡 Moderate' : '🟢 Low'}</span>
-            </div>
-
-            <div className={`p-2.5 rounded-2xl border font-bold text-xs ${
-              report.trafficLight.sodiumStatus === 'RED' ? 'bg-rose-50 border-rose-200 text-rose-800' : (report.trafficLight.sodiumStatus === 'YELLOW' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800')
-            }`}>
-              <span className="text-[9px] block uppercase opacity-80">Sodium</span>
-              <strong className="text-sm font-black">{report.nutrition.sodium}mg</strong>
-              <span className="text-[9px] block font-black mt-0.5">🟢 Normal</span>
-            </div>
+            <div className={`p-2.5 rounded-2xl border font-bold text-xs ${report.trafficLight.sugarStatus === 'RED' ? 'bg-rose-50 border-rose-200 text-rose-800' : report.trafficLight.sugarStatus === 'YELLOW' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}><span className="text-[9px] block uppercase opacity-80">Added Sugar</span><strong className="text-sm font-black">{report.nutrition.sugar}g</strong><span className="text-[9px] block font-black mt-0.5">{report.trafficLight.sugarStatus === 'RED' ? '🔴 High Risk' : '🟢 Safe'}</span></div>
+            <div className={`p-2.5 rounded-2xl border font-bold text-xs ${report.trafficLight.fatStatus === 'RED' ? 'bg-rose-50 border-rose-200 text-rose-800' : report.trafficLight.fatStatus === 'YELLOW' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}><span className="text-[9px] block uppercase opacity-80">Sat. Fat</span><strong className="text-sm font-black">{report.nutrition.saturatedFat}g</strong><span className="text-[9px] block font-black mt-0.5">{report.trafficLight.fatStatus === 'YELLOW' ? '🟡 Moderate' : '🟢 Low'}</span></div>
+            <div className={`p-2.5 rounded-2xl border font-bold text-xs ${report.trafficLight.sodiumStatus === 'RED' ? 'bg-rose-50 border-rose-200 text-rose-800' : report.trafficLight.sodiumStatus === 'YELLOW' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}><span className="text-[9px] block uppercase opacity-80">Sodium</span><strong className="text-sm font-black">{report.nutrition.sodium}mg</strong><span className="text-[9px] block font-black mt-0.5">{report.trafficLight.sodiumStatus === 'RED' ? '🔴 High' : report.trafficLight.sodiumStatus === 'YELLOW' ? '🟡 Moderate' : '🟢 Normal'}</span></div>
           </div>
         </div>
       )}
 
-      {/* TruthIn Feature 2: Hidden Sugars & Palm Oil Unmasker */}
+      {/* Hidden Sugars & Palm Oil Unmasker */}
       {report.hiddenIngredientsAlert && (report.hiddenIngredientsAlert.hiddenSugars.length > 0 || report.hiddenIngredientsAlert.cheapOils.length > 0) && (
         <div className="p-4 rounded-3xl bg-rose-50 border border-rose-200 text-rose-900 space-y-2">
-          <div className="flex items-center gap-2">
-            <AlertOctagon size={18} className="text-rose-600 shrink-0" />
-            <h4 className="text-xs font-black uppercase tracking-wider text-rose-950">Hidden Sugar & Palm Oil Detector</h4>
-          </div>
-
-          {report.hiddenIngredientsAlert.hiddenSugars.length > 0 && (
-            <div className="text-xs leading-relaxed">
-              <strong className="font-extrabold text-rose-950">Hidden Sugars Detected:</strong>{' '}
-              {report.hiddenIngredientsAlert.hiddenSugars.join(', ')}
-            </div>
-          )}
-
-          {report.hiddenIngredientsAlert.cheapOils.length > 0 && (
-            <div className="text-xs leading-relaxed">
-              <strong className="font-extrabold text-rose-950">Refined Oils Detected:</strong>{' '}
-              {report.hiddenIngredientsAlert.cheapOils.join(', ')}
-            </div>
-          )}
+          <div className="flex items-center gap-2"><AlertOctagon size={18} className="text-rose-600 shrink-0" /><h4 className="text-xs font-black uppercase tracking-wider text-rose-950">Hidden Sugar & Palm Oil Detector</h4></div>
+          {report.hiddenIngredientsAlert.hiddenSugars.length > 0 && <div className="text-xs leading-relaxed"><strong className="font-extrabold text-rose-950">Hidden Sugars Detected:</strong> {report.hiddenIngredientsAlert.hiddenSugars.join(', ')}</div>}
+          {report.hiddenIngredientsAlert.cheapOils.length > 0 && <div className="text-xs leading-relaxed"><strong className="font-extrabold text-rose-950">Refined Oils Detected:</strong> {report.hiddenIngredientsAlert.cheapOils.join(', ')}</div>}
         </div>
       )}
 
-      {/* TruthIn Feature 3: Healthier Swaps / Clean Alternatives */}
+      {/* Healthier Swaps */}
       {report.healthierSwaps && report.healthierSwaps.length > 0 && (
         <div className="food-card p-4 rounded-3xl bg-white border border-slate-200 space-y-2.5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-black text-slate-500 uppercase tracking-wider">Healthier Swaps & Alternatives</h3>
-            <span className="text-[10px] text-emerald-700 font-extrabold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-              Clean Choice
-            </span>
-          </div>
-
-          <div className="space-y-2">
-            {report.healthierSwaps.map((swap, idx) => (
-              <div key={idx} className="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200 flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-black text-slate-900">{swap.name}</span>
-                    <span className="text-[9px] font-bold text-emerald-800 bg-white px-1.5 py-0.5 rounded border border-emerald-300">
-                      ⭐ {swap.rating}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-slate-600 mt-0.5 font-medium">{swap.brand} • {swap.reason}</p>
-                </div>
-                <ArrowRight size={16} className="text-emerald-700 shrink-0" />
-              </div>
-            ))}
-          </div>
+          <div className="flex items-center justify-between"><h3 className="text-xs font-black text-slate-500 uppercase tracking-wider">Healthier Swaps & Alternatives</h3><span className="text-[10px] text-emerald-700 font-extrabold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Clean Choice</span></div>
+          <div className="space-y-2">{report.healthierSwaps.map((swap, idx) => <div key={idx} className="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200 flex items-center justify-between"><div><div className="flex items-center gap-1.5"><span className="text-xs font-black text-slate-900">{swap.name}</span><span className="text-[9px] font-bold text-emerald-800 bg-white px-1.5 py-0.5 rounded border border-emerald-300">⭐ {swap.rating}</span></div><p className="text-[10px] text-slate-600 mt-0.5 font-medium">{swap.brand} • {swap.reason}</p></div><ArrowRight size={16} className="text-emerald-700 shrink-0" /></div>)}</div>
         </div>
       )}
 
-      {/* Nutrition Breakdown Grid */}
-      <div className="food-card p-4.5 rounded-3xl space-y-3 bg-white border border-slate-200">
-        <h3 className="text-xs font-black text-slate-500 uppercase tracking-wider">Nutrition Breakdown (per 100g)</h3>
-        <div className="grid grid-cols-4 gap-2 text-center">
-          <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-200">
-            <span className="text-[9px] text-slate-500 block font-black uppercase">Calories</span>
-            <span className="text-sm font-black text-slate-900">{report.nutrition.calories}</span>
-            <span className="text-[9px] text-slate-400 block font-medium">kcal</span>
-          </div>
+      {/* Nutrition Breakdown */}
+      <div className="food-card p-4.5 rounded-3xl space-y-3 bg-white border border-slate-200"><h3 className="text-xs font-black text-slate-500 uppercase tracking-wider">Nutrition Breakdown (per 100g)</h3><div className="grid grid-cols-4 gap-2 text-center"><div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-200"><span className="text-[9px] text-slate-500 block font-black uppercase">Calories</span><span className="text-sm font-black text-slate-900">{report.nutrition.calories}</span><span className="text-[9px] text-slate-400 block font-medium">kcal</span></div><div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-200"><span className="text-[9px] text-slate-500 block font-black uppercase">Protein</span><span className="text-sm font-black text-emerald-600">{report.nutrition.proteins}g</span><span className="text-[9px] text-slate-400 block font-medium">muscle</span></div><div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-200"><span className="text-[9px] text-slate-500 block font-black uppercase">Carbs</span><span className="text-sm font-black text-teal-600">{report.nutrition.carbs}g</span><span className="text-[9px] text-slate-400 block font-medium">energy</span></div><div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-200"><span className="text-[9px] text-slate-500 block font-black uppercase">Sugar</span><span className={`text-sm font-black ${report.nutrition.sugar > 15 ? 'text-amber-600' : 'text-slate-900'}`}>{report.nutrition.sugar}g</span><span className="text-[9px] text-slate-400 block font-medium">sweet</span></div></div></div>
 
-          <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-200">
-            <span className="text-[9px] text-slate-500 block font-black uppercase">Protein</span>
-            <span className="text-sm font-black text-emerald-600">{report.nutrition.proteins}g</span>
-            <span className="text-[9px] text-slate-400 block font-medium">muscle</span>
-          </div>
+      {/* Ingredients & Additives */}
+      <div className="food-card p-4.5 rounded-3xl space-y-3 bg-white border border-slate-200"><h3 className="text-xs font-black text-slate-500 uppercase tracking-wider">Ingredients List & Additive Decoder</h3><div className="flex flex-wrap gap-1.5">{report.ingredients.map((ing, idx) => <span key={idx} className="text-xs bg-slate-100 text-slate-800 border border-slate-200 px-2.5 py-1 rounded-xl font-semibold">{ing}</span>)}</div>{report.additives && report.additives.length > 0 && <div className="space-y-2 pt-2 border-t border-slate-100"><span className="text-[10px] font-black text-amber-700 uppercase tracking-wider block">Explained E-Number Additives ({report.additives.length})</span>{report.additives.map((add, idx) => <div key={idx} className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-xs"><div className="flex items-center justify-between mb-1"><span className="font-black text-emerald-800">{add.code}: {add.name}</span><span className="text-[9px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">{add.safety}</span></div><p className="text-slate-600 text-[11px] leading-relaxed">{add.explanation}</p></div>)}</div>}</div>
 
-          <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-200">
-            <span className="text-[9px] text-slate-500 block font-black uppercase">Carbs</span>
-            <span className="text-sm font-black text-teal-600">{report.nutrition.carbs}g</span>
-            <span className="text-[9px] text-slate-400 block font-medium">energy</span>
-          </div>
-
-          <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-200">
-            <span className="text-[9px] text-slate-500 block font-black uppercase">Sugar</span>
-            <span className={`text-sm font-black ${report.nutrition.sugar > 15 ? 'text-amber-600' : 'text-slate-900'}`}>
-              {report.nutrition.sugar}g
-            </span>
-            <span className="text-[9px] text-slate-400 block font-medium">sweet</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Ingredients & Additives Decoding */}
-      <div className="food-card p-4.5 rounded-3xl space-y-3 bg-white border border-slate-200">
-        <h3 className="text-xs font-black text-slate-500 uppercase tracking-wider">Ingredients List & Additive Decoder</h3>
-
-        <div className="flex flex-wrap gap-1.5">
-          {report.ingredients.map((ing, idx) => (
-            <span key={idx} className="text-xs bg-slate-100 text-slate-800 border border-slate-200 px-2.5 py-1 rounded-xl font-semibold">
-              {ing}
-            </span>
-          ))}
-        </div>
-
-        {report.additives && report.additives.length > 0 && (
-          <div className="space-y-2 pt-2 border-t border-slate-100">
-            <span className="text-[10px] font-black text-amber-700 uppercase tracking-wider block">
-              Explained E-Number Additives ({report.additives.length})
-            </span>
-            {report.additives.map((add, idx) => (
-              <div key={idx} className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-xs">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-black text-emerald-800">{add.code}: {add.name}</span>
-                  <span className="text-[9px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
-                    {add.safety}
-                  </span>
-                </div>
-                <p className="text-slate-600 text-[11px] leading-relaxed">{add.explanation}</p>
+      {/* Scan Feedback */}
+      <div className="p-4 rounded-3xl bg-white border border-slate-200 shadow-sm space-y-3">
+        <div className="flex items-center gap-2"><CheckCircle2 size={19} className="text-emerald-600" /><h3 className="text-xs font-black text-slate-700 uppercase tracking-wider">Was this result correct?</h3></div>
+        {feedbackState === 'submitted' ? (
+          <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-800">Thanks! Your correction has been recorded and will help improve FoodScan AI.</div>
+        ) : feedbackState === 'correct' ? (
+          <div className="flex items-center justify-between gap-3"><p className="text-xs text-slate-600">Great — thanks for confirming this result.</p><button onClick={() => setFeedbackState('idle')} className="text-[10px] font-bold text-slate-500 underline">Change</button></div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-2"><button onClick={() => setFeedbackState('correct')} className="py-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-black">✓ Yes, correct</button><button onClick={() => setFeedbackState('reporting')} className="py-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-black">Report an issue</button></div>
+            {feedbackState === 'reporting' && (
+              <div className="space-y-2 pt-2 border-t border-slate-100">
+                <select value={feedbackType} onChange={e => setFeedbackType(e.target.value)} className="w-full rounded-xl border border-slate-200 p-2.5 text-xs bg-white"><option value="WRONG_PRODUCT">Wrong product name</option><option value="WRONG_BRAND">Wrong brand</option><option value="WRONG_NUTRITION">Wrong nutrition</option><option value="WRONG_ALLERGEN">Wrong allergen</option><option value="WRONG_INGREDIENTS">Wrong ingredients</option><option value="OTHER">Other issue</option></select>
+                <input value={correctedName} onChange={e => setCorrectedName(e.target.value)} placeholder="Correct product name (optional)" maxLength={180} className="w-full rounded-xl border border-slate-200 p-2.5 text-xs" />
+                <input value={correctedBrand} onChange={e => setCorrectedBrand(e.target.value)} placeholder="Correct brand (optional)" maxLength={180} className="w-full rounded-xl border border-slate-200 p-2.5 text-xs" />
+                <textarea value={comment} onChange={e => setComment(e.target.value)} placeholder="What was wrong? (optional)" maxLength={1000} rows={3} className="w-full rounded-xl border border-slate-200 p-2.5 text-xs resize-none" />
+                {feedbackError && <p className="text-[10px] text-rose-700 font-semibold">{feedbackError}</p>}
+                <button disabled={feedbackSubmitting} onClick={submitFeedback} className="w-full py-2.5 rounded-xl bg-slate-900 text-white text-xs font-black disabled:opacity-50">{feedbackSubmitting ? 'Submitting...' : 'Submit correction'}</button>
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
       </div>
 
       {/* Floating Ask Nutritionist AI Chatbot Button */}
-      <button
-        onClick={() => setIsChatOpen(true)}
-        className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-700 to-emerald-700 text-white font-black text-xs shadow-lg shadow-teal-700/20 flex items-center justify-center gap-2 hover:opacity-95 transition"
-      >
-        <Bot size={18} /> 💬 Ask Nutritionist AI Chatbot About This Food
-      </button>
+      <button onClick={() => setIsChatOpen(true)} className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-700 to-emerald-700 text-white font-black text-xs shadow-lg shadow-teal-700/20 flex items-center justify-center gap-2 hover:opacity-95 transition"><Bot size={18} /> 💬 Ask Nutritionist AI Chatbot About This Food</button>
 
       {/* Action to Scan Another Item */}
-      <button
-        onClick={() => setScreen('CAMERA')}
-        className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold text-sm shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2 transition active:scale-[0.98]"
-      >
-        <Camera size={20} /> Scan Another Food Item
-      </button>
+      <button onClick={() => setScreen('CAMERA')} className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold text-sm shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2 transition active:scale-[0.98]"><Camera size={20} /> Scan Another Food Item</button>
 
       {/* AI Nutritionist Chatbot Modal */}
-      <AIChatbotModal
-        isOpen={isChatOpen}
-        onClose={() => setIsChatOpen(false)}
-        contextFood={report}
-      />
+      <AIChatbotModal isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} contextFood={report} />
     </div>
   );
 };
