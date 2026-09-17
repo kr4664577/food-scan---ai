@@ -21,14 +21,29 @@ export const authenticateJWT = (
     });
   }
 
-  const token = authHeader.split(' ')[1];
-  const secret = process.env.JWT_SECRET || 'fallback_jwt_secret';
+  const token = authHeader.slice('Bearer '.length).trim();
+  const secret = process.env.JWT_SECRET;
+
+  // Never run authenticated endpoints with a predictable fallback secret.
+  if (!secret || secret.length < 32) {
+    console.error('JWT_SECRET is missing or too short for production.');
+    return res.status(503).json({
+      success: false,
+      error: { message: 'Authentication service is not configured.', statusCode: 503 }
+    });
+  }
 
   try {
     const decoded = jwt.verify(token, secret) as { userId: string; email: string };
+    if (!decoded?.userId || !decoded?.email) {
+      return res.status(401).json({
+        success: false,
+        error: { message: 'Invalid token payload.', statusCode: 401 }
+      });
+    }
     req.user = decoded;
     next();
-  } catch (error) {
+  } catch (_error) {
     return res.status(401).json({
       success: false,
       error: { message: 'Invalid or expired token.', statusCode: 401 }
