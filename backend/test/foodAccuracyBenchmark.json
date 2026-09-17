@@ -1,0 +1,30 @@
+{
+  "version": "1.0.0",
+  "purpose": "Deterministic benchmark fixtures for FoodScan AI food recognition and nutrition invariants. These are reference expectations, not claims about live model accuracy.",
+  "mealCases": [
+    {"id":"meal-roti-dal-rice","input":"2 rotis + 1 bowl dal + 1 bowl cooked rice","expectedItems":["Roti / Chapati","Dal Tadka","Cooked Basmati Rice"],"servings":[2,1,1]},
+    {"id":"meal-rajma-rice","input":"1 bowl rajma with 1 bowl rice","expectedItems":["Rajma Curry","Cooked Basmati Rice"],"servings":[1,1]},
+    {"id":"meal-poha-curd","input":"1 plate poha with 1 bowl curd","expectedItems":["Poha","Curd / Dahi"],"servings":[1,1]},
+    {"id":"meal-idli-sambar","input":"3 idlis with 1 bowl sambar","expectedItems":["Idli","Sambar"],"servings":[3,1]},
+    {"id":"meal-paneer-roti","input":"2 rotis with 100 g paneer tikka","expectedItems":["Roti / Chapati","Paneer Tikka"],"servings":[2,100]}
+  ],
+  "normalizationCases": [
+    {"input":"150 g","referenceGrams":100,"basis":"GRAMS","multiplier":1.5},
+    {"input":"1/2 bowl","referenceGrams":200,"basis":"FRACTION","multiplier":0.5},
+    {"input":"2 rotis","referenceGrams":40,"basis":"COUNT","multiplier":2},
+    {"input":"3 idlis","referenceGrams":50,"basis":"COUNT","multiplier":3},
+    {"input":"1 bowl","referenceGrams":180,"basis":"CATALOG_PORTION","multiplier":1}
+  ],
+  "nutritionInvariants": [
+    "calories must be non-negative",
+    "protein/carbs/fat/fiber/sugar/sodium/saturatedFat must be non-negative",
+    "sugar must not exceed carbs",
+    "saturatedFat must not exceed total fat",
+    "meal totals must equal the sum of normalized item nutrition"
+  ],
+  "identitySafety": [
+    "barcode data must not override a conflicting visible package identity",
+    "approved corrections may change identity fields only",
+    "correction-derived nutrition, ingredients, allergens and additives must not be copied"
+  ]
+}
