@@ -19,13 +19,34 @@ const PORT = process.env.PORT || 5001;
 
 // Security Middlewares
 app.use(helmet());
-app.use(cors({ origin: '*' }));
+
+// In production, prefer an explicit allow-list. Keep localhost defaults for development.
+const configuredOrigins = (process.env.FRONTEND_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const allowedOrigins = configuredOrigins.length > 0
+  ? configuredOrigins
+  : ['http://localhost:3000', 'http://localhost:5173'];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow non-browser/server-to-server requests without an Origin header.
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('CORS origin not allowed'));
+  },
+  credentials: true
+}));
+
 app.use(express.json({ limit: '15mb' }));
 
 // Rate Limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
   message: { success: false, error: { message: 'Too many requests, please try again later.', statusCode: 429 } }
 });
 app.use('/api', limiter);
@@ -36,7 +57,7 @@ const healthHandler = (req: any, res: any) => {
     status: 'OK',
     service: 'FoodScan AI Backend API',
     timestamp: new Date().toISOString(),
-    version: '1.0.0'
+    version: '2.0.0'
   });
 };
 app.get('/health', healthHandler);
@@ -70,7 +91,7 @@ app.use(errorHandler);
 
 if (!process.env.VERCEL) {
   app.listen(Number(PORT), '0.0.0.0', async () => {
-    console.log(`🚀 FoodScan AI Backend API running on http://0.0.0.0:${PORT} (LAN: http://192.168.31.218:${PORT})`);
+    console.log(`🚀 FoodScan AI Backend API running on port ${PORT}`);
     try {
       await seedFoodDatabase();
     } catch (e) {
