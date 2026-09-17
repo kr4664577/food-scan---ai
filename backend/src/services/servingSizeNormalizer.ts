@@ -13,7 +13,9 @@ export function normalizeServingText(text:string, referenceGrams:number):Normali
   if(fractionValue!==null){return {grams:ref?Math.round(ref*fractionValue):null,multiplier:fractionValue,basis:'FRACTION',confidence:0.84};}
   const count=s.match(/\b(\d+(?:\.\d+)?)\s*(?:x\s*)?(?:pieces?|piece|items?|servings?|rotis?|roti|chapatis?|chapati|idlis?|idli|dosas?|dosa|parathas?|paratha|chillas?|chilla)\b/);
   if(count){const multiplier=Number(count[1]);return {grams:ref?Math.round(ref*multiplier):null,multiplier,basis:'COUNT',confidence:0.86};}
-  if(/\b(one|1)\s*(?:serving|bowl|cup|plate|portion)\b/.test(s)||/\b(?:1|one)\b/.test(s)){return {grams:ref||null,multiplier:1,basis:'CATALOG_PORTION',confidence:0.72,warning:'Serving unit mapped to the catalog reference portion; actual portion may differ.'};}
-  if(/\b(?:half|1\/2)\s*(?:bowl|cup|plate|serving|portion)\b/.test(s)){return {grams:ref?Math.round(ref*0.5):null,multiplier:0.5,basis:'FRACTION',confidence:0.8};}
+  if(/\b(one|1)\s*(?:serving|bowl|cup|plate|portion)\b/.test(s))return {grams:ref||null,multiplier:1,basis:'CATALOG_PORTION',confidence:0.72,warning:'Serving unit mapped to the catalog reference portion; actual portion may differ.'};
+  if(/\b(?:half|1\/2)\s*(?:bowl|cup|plate|serving|portion)\b/.test(s))return {grams:ref?Math.round(ref*0.5):null,multiplier:0.5,basis:'FRACTION',confidence:0.8};
+  if(/\b(?:two|2)\s*(?:bowls?|cups?|plates?|servings?|portions?)\b/.test(s))return {grams:ref?ref*2:null,multiplier:2,basis:'COUNT',confidence:0.72};
+  if(/\b(?:three|3)\s*(?:bowls?|cups?|plates?|servings?|portions?)\b/.test(s))return {grams:ref?ref*3:null,multiplier:3,basis:'COUNT',confidence:0.7};
   return {grams:ref||null,multiplier:1,basis:ref?'CATALOG_PORTION':'UNKNOWN',confidence:ref?0.55:0.2,warning:ref?'Could not reliably parse the serving text; using the catalog reference portion.':'Portion could not be normalized reliably.'};
 }
