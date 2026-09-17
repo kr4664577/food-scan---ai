@@ -62,3 +62,34 @@ export function validateNutrition(values: Record<string, unknown>): string[] {
   }
   return missing;
 }
+
+/**
+ * Detect internally inconsistent nutrition OCR without pretending that every label
+ * must exactly equal a simple macro-calorie formula (fiber, polyols, rounding and
+ * serving conventions can legitimately create differences).
+ */
+export function nutritionConsistencyIssues(values: Record<string, unknown>): string[] {
+  const issues: string[] = [];
+  const calories = Number(values.calories);
+  const proteins = Number(values.proteins);
+  const carbs = Number(values.carbs);
+  const fats = Number(values.fats);
+  const sugar = Number(values.sugar);
+  const sodium = Number(values.sodium);
+  const saturatedFat = Number(values.saturatedFat);
+
+  if ([calories, proteins, carbs, fats, sugar, sodium, saturatedFat].some(v => !Number.isFinite(v) || v < 0)) {
+    return ['nonNegativeNutritionValues'];
+  }
+  if (sugar > carbs + 0.5) issues.push('sugarExceedsCarbohydrates');
+  if (saturatedFat > fats + 0.5) issues.push('saturatedFatExceedsTotalFat');
+
+  const macroCalories = proteins * 4 + carbs * 4 + fats * 9;
+  if (calories > 20 && macroCalories > 20) {
+    const relativeDifference = Math.abs(calories - macroCalories) / Math.max(calories, macroCalories);
+    if (relativeDifference > 0.45) issues.push('calorieMacroMismatch');
+  }
+
+  if (sodium > 10000) issues.push('implausibleSodium');
+  return issues;
+}
