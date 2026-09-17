@@ -12,10 +12,11 @@ model User {
   email        String        @unique
   passwordHash String
   fullName     String
-  dietaryGoals String?       // e.g. "Low Sodium, High Protein"
+  dietaryGoals String?
   allergies    UserAllergy[]
   scans        ScanHistory[]
   favorites    Favorite[]
+  usageLogs    ScanUsageLog[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 }
@@ -24,7 +25,7 @@ model UserAllergy {
   id        String   @id @default(uuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  allergen  String   // e.g. "Peanuts", "Gluten", "Dairy", "Soy"
+  allergen  String
   createdAt DateTime @default(now())
 }
 
@@ -32,7 +33,7 @@ model ScanHistory {
   id                 String     @id @default(uuid())
   userId             String
   user               User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  scanType           String     // "PACKAGED", "MEAL", "QUALITY_INSPECTION"
+  scanType           String
   barcode            String?
   imageUrl           String?
   productName        String
@@ -44,13 +45,13 @@ model ScanHistory {
   sugar              Float?
   sodium             Float?
   saturatedFat       Float?
-  nutritionScore     String?    // e.g., "A", "B", "C", "D", "E" or "88/100"
+  nutritionScore     String?
   rawOcrText         String?
-  ingredients        String?    // JSON string array
-  detectedAllergens  String?    // JSON string array
-  additives          String?    // JSON string array of additive objects
-  qualityAnalysis    String?    // JSON string object
-  confidenceScore    Float?     // e.g., 0.95
+  ingredients        String?
+  detectedAllergens  String?
+  additives          String?
+  qualityAnalysis    String?
+  confidenceScore    Float?
   favorites          Favorite[]
   createdAt          DateTime   @default(now())
 }
@@ -60,7 +61,7 @@ model Favorite {
   userId    String
   user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   scanId    String
-  scan      ScanHistory @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scan       ScanHistory @relation(fields: [scanId], references: [id], onDelete: Cascade)
   createdAt DateTime    @default(now())
 
   @@unique([userId, scanId])
@@ -68,11 +69,11 @@ model Favorite {
 
 model FoodMasterItem {
   id             String   @id @default(uuid())
-  category       String   // "HOME_FOOD", "RESTAURANT_FOOD", "OUTSIDE_PACKAGED", "FRUITS", "VEGETABLES"
+  category       String
   name           String   @unique
   brandName      String?
   barcode        String?
-  keywords       String   // comma-separated search terms
+  keywords       String
   portion        String
   calories       Float
   protein        Float
@@ -82,12 +83,34 @@ model FoodMasterItem {
   sugar          Float?
   sodium         Float?
   saturatedFat   Float?
-  truthScore     Float    // 0.0 to 5.0
-  novaLevel      Int      // 1, 2, 3, 4
-  ratingCategory String   // "GOOD", "MODERATE", "BAD"
-  healthySwaps   String?  // JSON string of recommended healthier options
-  ingredients    String?  // JSON string array
-  allergens      String?  // JSON string array
+  truthScore     Float
+  novaLevel      Int
+  ratingCategory String
+  healthySwaps   String?
+  ingredients    String?
+  allergens      String?
   healthSummary  String?
   createdAt      DateTime @default(now())
+}
+
+model ScanUsageLog {
+  id               String   @id @default(uuid())
+  userId           String?
+  user             User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scanType         String
+  status           String
+  model            String?
+  inputTokens      Int?
+  outputTokens     Int?
+  estimatedCostUsd  Float?
+  imageBytes       Int?
+  processingTimeMs Int?
+  cacheHit         Boolean  @default(false)
+  errorCode        String?
+  createdAt        DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([scanType, createdAt])
+  @@index([status, createdAt])
+  @@index([model, createdAt])
 }

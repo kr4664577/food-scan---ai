@@ -10,3 +10,7 @@ services:
         value: production
       - key: GEMINI_API_KEY
         sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: FREE_DAILY_SCAN_LIMIT
+        value: "10"
