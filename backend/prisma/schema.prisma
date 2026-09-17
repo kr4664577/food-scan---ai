@@ -34,8 +34,8 @@ model ScanHistory {
   userId             String
   user               User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   scanType           String
-  barcode             String?
-  imageUrl            String?
+  barcode            String?
+  imageUrl           String?
   productName        String
   brandName          String?
   calories           Float?
@@ -102,6 +102,7 @@ model ScanUsageLog {
   model            String?
   inputTokens      Int?
   outputTokens     Int?
+  estimatedCostUsd  Float?
   imageBytes       Int?
   processingTimeMs Int?
   cacheHit         Boolean  @default(false)
@@ -111,4 +112,5 @@ model ScanUsageLog {
   @@index([userId, createdAt])
   @@index([scanType, createdAt])
   @@index([status, createdAt])
+  @@index([model, createdAt])
 }
