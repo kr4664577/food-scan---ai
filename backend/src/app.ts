@@ -9,6 +9,7 @@ import historyRoutes from './routes/history.routes';
 import uploadRoutes from './routes/upload.routes';
 import chatRoutes from './routes/chat.routes';
 import adminRoutes from './routes/admin.routes';
+import feedbackRoutes from './routes/feedback.routes';
 import { errorHandler } from './middlewares/error.middleware';
 import { seedFoodDatabase } from './db/seedFoods';
 
@@ -71,6 +72,7 @@ app.use('/api/history', historyRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/feedback', feedbackRoutes);
 
 // Serve compiled mobile/web assets and APK downloads in production
 import path from 'path';
