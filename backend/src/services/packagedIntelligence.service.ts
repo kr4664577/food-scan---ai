@@ -1,7 +1,8 @@
 import { fetchBarcodeData, BarcodeProductResult } from './barcode.service';
 import { runUnifiedVisionAnalysis } from './aiVision.service';
+import { selectReliableField, validateNutrition, clamp01, EvidenceSource } from './dataConfidence.service';
 
-export type DataSourceType = 'PACKAGE_OCR' | 'EXTERNAL_DATABASE' | 'AI_ESTIMATE';
+export type DataSourceType = EvidenceSource;
 
 export interface FieldConfidence {
   productName: number;
@@ -25,227 +26,26 @@ export interface PackagedIntelligenceResult {
   brandName?: string;
   barcode?: string;
   nutritionScore?: string;
-  
-  nutrition: {
-    calories: number;
-    proteins: number;
-    carbs: number;
-    fats: number;
-    sugar: number;
-    sodium: number;
-    saturatedFat: number;
-  };
-
-  // TruthIn Rating & Intelligence Suite
-  truthRating: {
-    score: number; // e.g. 4.2 out of 5.0
-    maxScore: number;
-    ratingLabel: string;
-    ratingColor: string;
-  };
-
-  novaGroup: {
-    level: 1 | 2 | 3 | 4;
-    label: string;
-    description: string;
-    badgeColor: string;
-  };
-
-  trafficLight: {
-    overallStatus: 'GREEN' | 'YELLOW' | 'RED';
-    sugarStatus: 'GREEN' | 'YELLOW' | 'RED';
-    sodiumStatus: 'GREEN' | 'YELLOW' | 'RED';
-    fatStatus: 'GREEN' | 'YELLOW' | 'RED';
-  };
-
-  healthierSwaps: Array<{
-    name: string;
-    brand: string;
-    calories: number;
-    rating: number;
-    reason: string;
-  }>;
-
-  hiddenIngredientsAlert: {
-    hiddenSugars: string[];
-    cheapOils: string[];
-  };
-  
-  ingredients: string[];
-  detectedAllergens: string[];
-  
-  additives: Array<{
-    code: string;
-    name: string;
-    safety: 'Safe' | 'Use in Moderation' | 'Avoid';
-    explanation: string;
-  }>;
-  
-  healthHighlights: Array<{
-    type: 'warning' | 'info' | 'good';
-    label: string;
-    description: string;
-  }>;
-  
-  summary: string;
-  rawOcrText: string;
-  
-  // Phase 2 Metadata
-  confidence: FieldConfidence;
-  sources: DataSourcesMap;
-  missingFields: string[];
-  uncertaintyWarnings: string[];
-  isValidated: boolean;
+  nutrition: { calories:number; proteins:number; carbs:number; fats:number; sugar:number; sodium:number; saturatedFat:number };
+  truthRating: { score:number; maxScore:number; ratingLabel:string; ratingColor:string };
+  novaGroup: { level:1|2|3|4; label:string; description:string; badgeColor:string };
+  trafficLight: { overallStatus:'GREEN'|'YELLOW'|'RED'; sugarStatus:'GREEN'|'YELLOW'|'RED'; sodiumStatus:'GREEN'|'YELLOW'|'RED'; fatStatus:'GREEN'|'YELLOW'|'RED' };
+  healthierSwaps: Array<{ name:string; brand:string; calories:number; rating:number; reason:string }>;
+  hiddenIngredientsAlert: { hiddenSugars:string[]; cheapOils:string[] };
+  ingredients:string[];
+  detectedAllergens:string[];
+  additives:Array<{ code:string; name:string; safety:'Safe'|'Use in Moderation'|'Avoid'; explanation:string }>;
+  healthHighlights:Array<{ type:'warning'|'info'|'good'; label:string; description:string }>;
+  summary:string;
+  rawOcrText:string;
+  confidence:FieldConfidence;
+  sources:DataSourcesMap;
+  missingFields:string[];
+  uncertaintyWarnings:string[];
+  isValidated:boolean;
 }
 
-/**
- * Known Brands & Product Catalog Index for High Precision Name Matching
- */
-const BRAND_PRODUCT_CATALOG: Array<{
-  keywords: string[];
-  productName: string;
-  brandName: string;
-  calories: number;
-  proteins: number;
-  carbs: number;
-  fats: number;
-  sugar: number;
-  sodium: number;
-  saturatedFat: number;
-  ingredients: string[];
-  allergens: string[];
-  truthScore: number;
-  novaLevel: 1 | 2 | 3 | 4;
-}> = [
-  {
-    keywords: ['good day', 'britannia good day', 'butter cookie'],
-    productName: 'Britannia Good Day Butter Cookies',
-    brandName: 'Britannia Industries',
-    calories: 480,
-    proteins: 6.0,
-    carbs: 66,
-    fats: 22,
-    sugar: 24,
-    sodium: 260,
-    saturatedFat: 11,
-    ingredients: ['Refined Wheat Flour (Maida)', 'Sugar', 'Edible Vegetable Oil (Palm)', 'Butter (3%)', 'Invert Sugar Syrup', 'Raising Agents (E500ii, E503ii)', 'Soy Lecithin (E322)'],
-    allergens: ['Wheat (Gluten)', 'Milk / Dairy', 'Soy'],
-    truthScore: 2.8,
-    novaLevel: 4
-  },
-  {
-    keywords: ['parle g', 'parle-g', 'parle biscuit'],
-    productName: 'Parle-G Original Glucose Biscuits',
-    brandName: 'Parle Products',
-    calories: 450,
-    proteins: 6.5,
-    carbs: 76,
-    fats: 13,
-    sugar: 26,
-    sodium: 220,
-    saturatedFat: 6,
-    ingredients: ['Wheat Flour (67%)', 'Sugar', 'Edible Vegetable Oil (Palm)', 'Invert Sugar Syrup', 'Raising Agents (E503ii, E500ii)', 'Milk Solids'],
-    allergens: ['Wheat (Gluten)', 'Milk'],
-    truthScore: 3.0,
-    novaLevel: 4
-  },
-  {
-    keywords: ['oreo', 'cream cookie', 'sandwich cookie'],
-    productName: 'Oreo Original Vanilla Cream Biscuits',
-    brandName: 'Mondelez International',
-    calories: 470,
-    proteins: 5.0,
-    carbs: 70,
-    fats: 19,
-    sugar: 38,
-    sodium: 380,
-    saturatedFat: 9.5,
-    ingredients: ['Wheat Flour', 'Sugar', 'Un-hydrogenated Vegetable Oil (Palm)', 'Cocoa Powder', 'Fructose Syrup', 'Cornstarch', 'Soy Lecithin'],
-    allergens: ['Wheat (Gluten)', 'Soy'],
-    truthScore: 1.8,
-    novaLevel: 4
-  },
-  {
-    keywords: ['dark fantasy', 'sunfeast dark fantasy', 'choco fills'],
-    productName: 'Sunfeast Dark Fantasy Choco Fills',
-    brandName: 'ITC Limited',
-    calories: 505,
-    proteins: 5.2,
-    carbs: 65,
-    fats: 25,
-    sugar: 37,
-    sodium: 210,
-    saturatedFat: 12.5,
-    ingredients: ['Refined Wheat Flour (Maida)', 'Sugar', 'Hydrogenated Vegetable Oils', 'Cocoa Solids (5%)', 'Milk Solids', 'Emulsifiers (E322, E471)'],
-    allergens: ['Wheat (Gluten)', 'Milk', 'Soy'],
-    truthScore: 1.9,
-    novaLevel: 4
-  },
-  {
-    keywords: ['maggi', 'masala noodles', '2 minute noodles'],
-    productName: 'Maggi 2-Minute Masala Instant Noodles',
-    brandName: 'Nestlé India',
-    calories: 420,
-    proteins: 8.5,
-    carbs: 63.5,
-    fats: 14.5,
-    sugar: 2.5,
-    sodium: 980,
-    saturatedFat: 6.8,
-    ingredients: ['Refined Wheat Flour (Maida)', 'Palm Oil', 'Iodised Salt', 'Wheat Gluten', 'Spices (Coriander, Cumin, Turmeric)', 'Flavor Enhancers (E635)'],
-    allergens: ['Wheat (Gluten)'],
-    truthScore: 2.2,
-    novaLevel: 4
-  },
-  {
-    keywords: ['lays', "lay's", 'magic masala', 'potato chips'],
-    productName: "Lay's India's Magic Masala Potato Chips",
-    brandName: 'PepsiCo India',
-    calories: 540,
-    proteins: 7.0,
-    carbs: 52,
-    fats: 33,
-    sugar: 3.5,
-    sodium: 780,
-    saturatedFat: 13,
-    ingredients: ['Potato', 'Edible Vegetable Oil (Palmolein)', 'Chilli, Onion Powder, Garlic Powder, Spices & Condiments', 'Iodised Salt', 'Acidity Regulators (E330)'],
-    allergens: ['May contain Milk'],
-    truthScore: 2.4,
-    novaLevel: 4
-  },
-  {
-    keywords: ['amul butter', 'pasteurised butter'],
-    productName: 'Amul Pasteurised Salted Butter',
-    brandName: 'Amul (GCMMF)',
-    calories: 720,
-    proteins: 0.5,
-    carbs: 0.5,
-    fats: 80,
-    sugar: 0.0,
-    sodium: 840,
-    saturatedFat: 51,
-    ingredients: ['Butter (Milk Fat 80%)', 'Iodised Salt (2%)'],
-    allergens: ['Milk / Dairy'],
-    truthScore: 3.8,
-    novaLevel: 2
-  },
-  {
-    keywords: ['kitkat', 'kit kat', 'nestle chocolate'],
-    productName: 'Nestlé KitKat 4-Finger Milk Chocolate Wafer',
-    brandName: 'Nestlé India',
-    calories: 515,
-    proteins: 7.2,
-    carbs: 64.5,
-    fats: 25.5,
-    sugar: 48,
-    sodium: 130,
-    saturatedFat: 14.5,
-    ingredients: ['Sugar', 'Milk Solids (16%)', 'Wheat Flour', 'Cocoa Butter', 'Cocoa Solids', 'Hydrogenated Vegetable Fats', 'Soy Lecithin'],
-    allergens: ['Wheat (Gluten)', 'Milk', 'Soy'],
-    truthScore: 2.0,
-    novaLevel: 4
-  }
-];
+const emptyNutrition = () => ({ calories:0, proteins:0, carbs:0, fats:0, sugar:0, sodium:0, saturatedFat:0 });
 
 export const runPackagedIntelligencePipeline = async (params: {
   barcode?: string;
@@ -255,69 +55,17 @@ export const runPackagedIntelligencePipeline = async (params: {
   foodCategory?: string;
 }): Promise<PackagedIntelligenceResult> => {
   const { barcode, imageBase64, mimeType, customItemName, foodCategory } = params;
-
   let dbData: BarcodeProductResult | null = null;
-  if (barcode) {
-    dbData = await fetchBarcodeData(barcode);
-  }
+  if (barcode) dbData = await fetchBarcodeData(barcode);
 
   let ocrResult: Partial<PackagedIntelligenceResult> | null = null;
-
   if (imageBase64) {
-    const prompt = `You are a certified food scientist & OCR computer vision engine. Analyze the packaging image.
-Identify EXACT BRAND NAME and EXACT PRODUCT NAME. Extract text via OCR, ingredients, nutrition facts, and additives.
-
-CRITICAL REQUIREMENT: Return STRICT JSON ONLY (no markdown formatting, no plain text) matching schema:
-{
-  "productName": "Exact Brand & Product Variant Name",
-  "brandName": "Brand Owner Name",
-  "nutrition": {
-    "calories": 0,
-    "proteins": 0,
-    "carbs": 0,
-    "fats": 0,
-    "sugar": 0,
-    "sodium": 0,
-    "saturatedFat": 0
-  },
-  "healthHighlights": [
-    { "type": "warning"|"info"|"good", "label": "Label", "description": "Description" }
-  ],
-  "ingredients": ["ingredient 1", "ingredient 2"],
-  "detectedAllergens": ["allergen 1"],
-  "additives": [
-    { "code": "E300", "name": "Ascorbic Acid", "safety": "Safe"|"Use in Moderation"|"Avoid", "explanation": "Simple language explanation" }
-  ],
-  "summary": "Nutritional summary",
-  "rawOcrText": "Exact text extracted from label",
-  "confidence": {
-    "productName": 0.95,
-    "ingredients": 0.90,
-    "nutrition": 0.85,
-    "allergens": 0.88,
-    "overall": 0.90
-  },
-  "missingFields": [],
-  "uncertaintyWarnings": []
-}`;
-
-    ocrResult = await runUnifiedVisionAnalysis({ prompt, imageBase64, mimeType, scanType: 'PACKAGED' });
-    if (!ocrResult || !ocrResult.productName) {
-      throw new Error('Food image analysis failed. Please try again.');
-    }
+    const prompt = `Analyze this packaged food image. Identify the exact visible brand and product variant only when supported by the image. OCR the nutrition panel and ingredient list exactly; do not invent unreadable values. If text is unreadable, return empty arrays/zero values for unavailable fields and add uncertainty warnings. Do not use knowledge of visually similar products. Return strict JSON only with productName, brandName, nutrition (calories, proteins, carbs, fats, sugar, sodium, saturatedFat), ingredients, detectedAllergens, additives, summary, rawOcrText, confidence (productName, ingredients, nutrition, allergens, overall), missingFields, uncertaintyWarnings.`;
+    ocrResult = await runUnifiedVisionAnalysis({ prompt, imageBase64, mimeType, scanType:'PACKAGED' });
+    if (!ocrResult || !ocrResult.productName) throw new Error('Food image analysis failed. Please try again.');
   }
-
-  if (!dbData && !ocrResult && !barcode) {
-    throw new Error('Food image analysis failed. Please try again.');
-  }
-
-  return mergeAndNormalizePackagedData({
-    barcode,
-    dbData,
-    ocrResult,
-    customItemName,
-    foodCategory
-  });
+  if (!dbData && !ocrResult && !barcode && !customItemName) throw new Error('Food image analysis failed. Please try again.');
+  return mergeAndNormalizePackagedData({ barcode, dbData, ocrResult, customItemName, foodCategory });
 };
 
 const mergeAndNormalizePackagedData = (input: {
@@ -328,142 +76,113 @@ const mergeAndNormalizePackagedData = (input: {
   foodCategory?: string;
 }): PackagedIntelligenceResult => {
   const { barcode, dbData, ocrResult, customItemName } = input;
+  const missingFields = new Set<string>();
+  const uncertaintyWarnings = new Set<string>();
+  const ocrConfidence = ocrResult?.confidence || {};
+  const hasBarcodeEvidence = Boolean(dbData && barcode && dbData.barcode === barcode);
 
-  const missingFields: string[] = [];
-  const uncertaintyWarnings: string[] = [];
+  const nameEvidence = selectReliableField<string>([
+    ...(customItemName ? [{ value: customItemName.trim(), source:'AI_ESTIMATE' as EvidenceSource, confidence:0.55 }] : []),
+    ...(hasBarcodeEvidence && dbData?.productName ? [{ value:dbData.productName, source:'BARCODE_DATABASE' as EvidenceSource, confidence:0.99 }] : []),
+    ...(ocrResult?.productName ? [{ value:ocrResult.productName, source:'PACKAGE_OCR' as EvidenceSource, confidence:clamp01(ocrConfidence.productName ?? 0) }] : [])
+  ]);
+  const productName = nameEvidence.value;
+  if (!productName) throw new Error('Unable to identify this packaged product with sufficient evidence.');
 
-  const rawQuery = (customItemName || ocrResult?.productName || dbData?.productName || '').toLowerCase().trim();
+  const brandEvidence = selectReliableField<string>([
+    ...(hasBarcodeEvidence && dbData?.brandName ? [{value:dbData.brandName,source:'BARCODE_DATABASE' as EvidenceSource,confidence:0.99}] : []),
+    ...(ocrResult?.brandName ? [{value:ocrResult.brandName,source:'PACKAGE_OCR' as EvidenceSource,confidence:clamp01(ocrConfidence.productName ?? 0)}] : [])
+  ]);
+  const brandName = brandEvidence.value || 'Unknown Brand';
 
-  // Match against Catalog Index if query matches
-  const matchedCatalog = rawQuery ? BRAND_PRODUCT_CATALOG.find(cat =>
-    cat.keywords.some(kw => rawQuery.includes(kw))
-  ) : undefined;
-  let productName = customItemName || ocrResult?.productName || dbData?.productName;
-  if (!productName) {
-    throw new Error('Food image analysis failed. Please try again.');
+  const nutritionFields = ['calories','proteins','carbs','fats','sugar','sodium','saturatedFat'] as const;
+  const nutrition = emptyNutrition();
+  const nutritionSources: Record<string, DataSourceType> = {};
+  let nutritionConfidence = 0;
+  for (const field of nutritionFields) {
+    const evidence = selectReliableField<number>([
+      ...(hasBarcodeEvidence && typeof dbData?.[field] === 'number' ? [{value:dbData[field] as number,source:'BARCODE_DATABASE' as EvidenceSource,confidence:0.99}] : []),
+      ...(typeof ocrResult?.nutrition?.[field] === 'number' && (ocrResult.nutrition[field] as number) > 0 ? [{value:ocrResult.nutrition[field] as number,source:'PACKAGE_OCR' as EvidenceSource,confidence:clamp01(ocrConfidence.nutrition ?? 0)}] : [])
+    ]);
+    if (evidence.value === null) { missingFields.add(`nutrition.${field}`); continue; }
+    nutrition[field] = Math.max(0, evidence.value);
+    nutritionSources[field] = evidence.source || 'AI_ESTIMATE';
+    nutritionConfidence += evidence.confidence;
   }
-  let brandName = ocrResult?.brandName || dbData?.brandName || matchedCatalog?.brandName || 'Food Brand';
-  let productNameSource: DataSourceType = ocrResult?.productName ? 'PACKAGE_OCR' : (dbData?.productName ? 'EXTERNAL_DATABASE' : 'AI_ESTIMATE');
-  let nameConfidence = ocrResult?.confidence?.productName || (matchedCatalog ? 0.98 : 0.92);
+  nutritionConfidence /= nutritionFields.length;
+  const nutritionValidation = validateNutrition(nutrition);
+  nutritionValidation.forEach(f => missingFields.add(`nutrition.${f}`));
 
-  const nutrition = {
-    calories: ocrResult?.nutrition?.calories ?? dbData?.calories ?? matchedCatalog?.calories ?? 0,
-    proteins: ocrResult?.nutrition?.proteins ?? dbData?.proteins ?? matchedCatalog?.proteins ?? 0,
-    carbs: ocrResult?.nutrition?.carbs ?? dbData?.carbs ?? matchedCatalog?.carbs ?? 0,
-    fats: ocrResult?.nutrition?.fats ?? dbData?.fats ?? matchedCatalog?.fats ?? 0,
-    sugar: ocrResult?.nutrition?.sugar ?? dbData?.sugar ?? matchedCatalog?.sugar ?? 0,
-    sodium: ocrResult?.nutrition?.sodium ?? dbData?.sodium ?? matchedCatalog?.sodium ?? 0,
-    saturatedFat: ocrResult?.nutrition?.saturatedFat ?? dbData?.saturatedFat ?? matchedCatalog?.saturatedFat ?? 0
-  };
+  const ingredientsEvidence = selectReliableField<string[]>([
+    ...(hasBarcodeEvidence && dbData?.ingredientsList?.length ? [{value:dbData.ingredientsList,source:'BARCODE_DATABASE' as EvidenceSource,confidence:0.99}] : []),
+    ...(ocrResult?.ingredients?.length ? [{value:ocrResult.ingredients,source:'PACKAGE_OCR' as EvidenceSource,confidence:clamp01(ocrConfidence.ingredients ?? 0)}] : [])
+  ]);
+  const ingredients = ingredientsEvidence.value || [];
+  if (!ingredients.length) missingFields.add('ingredients');
 
-  let ingredients = ocrResult?.ingredients || dbData?.ingredientsList || matchedCatalog?.ingredients || [];
+  const allergenEvidence = selectReliableField<string[]>([
+    ...(hasBarcodeEvidence && dbData?.detectedAllergens?.length ? [{value:dbData.detectedAllergens,source:'BARCODE_DATABASE' as EvidenceSource,confidence:0.99}] : []),
+    ...(ocrResult?.detectedAllergens?.length ? [{value:ocrResult.detectedAllergens,source:'PACKAGE_OCR' as EvidenceSource,confidence:clamp01(ocrConfidence.allergens ?? 0)}] : [])
+  ]);
+  const detectedAllergens = allergenEvidence.value || [];
+  if (!detectedAllergens.length) uncertaintyWarnings.add('Allergen information was not verified from a reliable product source. Check the package label before consuming.');
 
-  let detectedAllergens = ocrResult?.detectedAllergens || dbData?.detectedAllergens || matchedCatalog?.allergens || [];
+  const additiveEvidence = hasBarcodeEvidence && dbData?.additives?.length ? dbData.additives : (ocrResult?.additives || []);
+  const additives = additiveEvidence.map(a => ({ code:a.code || 'Unknown', name:a.name || a.code || 'Unknown additive', safety:(a.safety === 'Safe' || a.safety === 'Avoid') ? a.safety : 'Use in Moderation' as const, explanation:a.explanation || 'Additive information should be verified against the package label.' }));
+  if (!additives.length) uncertaintyWarnings.add('No additives were reliably detected.');
 
-  // Calculate TruthRating (0.0 to 5.0 Stars)
-  let rawTruthScore = matchedCatalog?.truthScore || 3.2;
-  if (!matchedCatalog) {
-    if (nutrition.sugar > 30 || nutrition.sodium > 800) rawTruthScore = 1.8;
-    else if (nutrition.sugar > 15 || nutrition.fats > 20) rawTruthScore = 2.8;
-    else if (nutrition.proteins > 10 && nutrition.sugar < 8) rawTruthScore = 4.3;
-  }
-  const truthRating = {
-    score: Math.round(rawTruthScore * 10) / 10,
-    maxScore: 5.0,
-    ratingLabel: rawTruthScore >= 4.0 ? 'Health Choice' : (rawTruthScore >= 2.5 ? 'Moderate Choice' : 'Ultra-Processed Warning'),
-    ratingColor: rawTruthScore >= 4.0 ? 'text-emerald-700 bg-emerald-50 border-emerald-300' : (rawTruthScore >= 2.5 ? 'text-amber-700 bg-amber-50 border-amber-300' : 'text-rose-700 bg-rose-50 border-rose-300')
-  };
+  const rawOcrText = ocrResult?.rawOcrText || dbData?.ingredientsText || '';
+  if (!rawOcrText) missingFields.add('rawOcrText');
 
-  // Determine NOVA Processing Group
-  const novaLevel: 1 | 2 | 3 | 4 = matchedCatalog?.novaLevel || (nutrition.sugar > 15 || ingredients.some(i => i.toLowerCase().includes('syrup') || i.toLowerCase().includes('palm') || i.toLowerCase().includes('flavour')) ? 4 : 3);
+  const sugarStatus = nutrition.sugar > 20 ? 'RED' : nutrition.sugar > 8 ? 'YELLOW' : 'GREEN';
+  const sodiumStatus = nutrition.sodium > 600 ? 'RED' : nutrition.sodium > 250 ? 'YELLOW' : 'GREEN';
+  const fatStatus = nutrition.saturatedFat > 8 ? 'RED' : nutrition.saturatedFat > 3 ? 'YELLOW' : 'GREEN';
+  const overallStatus = [sugarStatus,sodiumStatus,fatStatus].includes('RED') ? 'RED' : [sugarStatus,sodiumStatus,fatStatus].includes('YELLOW') ? 'YELLOW' : 'GREEN';
+
+  const novaLevel:1|2|3|4 = /syrup|hydrogenated|emulsifier|flavou?r|sweetener|maltodextrin/i.test(ingredients.join(' ')) ? 4 : (ingredients.length > 5 ? 3 : 2);
   const novaGroup = {
-    level: novaLevel,
-    label: novaLevel === 4 ? 'NOVA 4: Ultra-Processed Food' : (novaLevel === 3 ? 'NOVA 3: Processed Food' : 'NOVA 1: Minimally Processed'),
-    description: novaLevel === 4 ? 'Formulated with industrial additives, refined sugar, and palm oil. Consume sparingly.' : 'Lightly processed packaged item.',
-    badgeColor: novaLevel === 4 ? 'bg-rose-500 text-white' : 'bg-emerald-600 text-white'
+    level:novaLevel,
+    label:`NOVA ${novaLevel}: ${novaLevel===4?'Ultra-Processed Food':novaLevel===3?'Processed Food':'Minimally Processed / Processed Ingredient'}`,
+    description:novaLevel===4?'Ingredients suggest an industrially formulated product.':'Processing level is estimated from the available ingredient evidence.',
+    badgeColor:novaLevel===4?'bg-rose-500 text-white':'bg-emerald-600 text-white'
   };
 
-  // Determine Traffic Light Status
-  const sugarStatus = nutrition.sugar > 20 ? 'RED' : (nutrition.sugar > 8 ? 'YELLOW' : 'GREEN');
-  const sodiumStatus = nutrition.sodium > 600 ? 'RED' : (nutrition.sodium > 250 ? 'YELLOW' : 'GREEN');
-  const fatStatus = nutrition.saturatedFat > 8 ? 'RED' : (nutrition.saturatedFat > 3 ? 'YELLOW' : 'GREEN');
-  const overallStatus = (sugarStatus === 'RED' || sodiumStatus === 'RED' || fatStatus === 'RED') ? 'RED' : ((sugarStatus === 'YELLOW' || sodiumStatus === 'YELLOW') ? 'YELLOW' : 'GREEN');
+  const scoreBase = overallStatus==='RED' ? 2.0 : overallStatus==='YELLOW' ? 3.0 : 4.0;
+  const rawTruthScore = Math.max(0, Math.min(5, scoreBase + Math.min(1, nutrition.proteins/20) - (novaLevel===4?0.5:0)));
+  const truthRating = { score:Math.round(rawTruthScore*10)/10, maxScore:5, ratingLabel:rawTruthScore>=4?'Health Choice':rawTruthScore>=2.5?'Moderate Choice':'Needs Caution', ratingColor:rawTruthScore>=4?'text-emerald-700 bg-emerald-50 border-emerald-300':rawTruthScore>=2.5?'text-amber-700 bg-amber-50 border-amber-300':'text-rose-700 bg-rose-50 border-rose-300' };
 
-  // Detect Hidden Sugars & Cheap Oils
-  const hiddenSugars: string[] = [];
-  const cheapOils: string[] = [];
-  ingredients.forEach(ing => {
-    const l = ing.toLowerCase();
-    if (l.includes('invert sugar') || l.includes('fructose') || l.includes('maltodextrin') || l.includes('dextrose') || l.includes('glucose syrup')) hiddenSugars.push(ing);
-    if (l.includes('palm') || l.includes('hydrogenated') || l.includes('palmolein')) cheapOils.push(ing);
-  });
+  const hiddenSugars = ingredients.filter(i => /invert sugar|fructose|maltodextrin|dextrose|glucose syrup/i.test(i));
+  const cheapOils = ingredients.filter(i => /palm|hydrogenated|palmolein/i.test(i));
+  const healthierSwaps = [];
 
-  // Generate Healthier Swaps / Clean Alternatives
-  const healthierSwaps = [
-    {
-      name: 'Organic Whole Grain Oats Cookies',
-      brand: 'NutriChoice Clean',
-      calories: 320,
-      rating: 4.6,
-      reason: '70% less added sugar & zero palm oil.'
-    },
-    {
-      name: 'Roasted Multigrain Makhana / Foxnuts',
-      brand: 'Farm Fresh',
-      calories: 180,
-      rating: 4.8,
-      reason: 'High protein & zero ultra-processed fats.'
-    }
-  ];
+  const overallConfidence = Math.min(1, (nameEvidence.confidence + nutritionConfidence + (ingredientsEvidence.confidence || 0) + (allergenEvidence.confidence || 0))/4);
+  if (overallConfidence < 0.75) uncertaintyWarnings.add('Some product fields are estimated or incomplete. Verify important details on the physical package.');
+  if (!hasBarcodeEvidence && ocrResult) uncertaintyWarnings.add('This scan was not matched to a verified barcode record; product identity comes from package evidence.');
 
   return {
     productName,
     brandName,
     barcode,
-    nutritionScore: dbData?.nutritionScore || ocrResult?.nutritionScore || (novaLevel === 4 ? 'D' : 'B'),
+    nutritionScore:dbData?.nutritionScore || ocrResult?.nutritionScore,
     nutrition,
     truthRating,
     novaGroup,
-    trafficLight: {
-      overallStatus,
-      sugarStatus,
-      sodiumStatus,
-      fatStatus
-    },
+    trafficLight:{overallStatus,sugarStatus,sodiumStatus,fatStatus},
     healthierSwaps,
-    hiddenIngredientsAlert: {
-      hiddenSugars,
-      cheapOils
-    },
+    hiddenIngredientsAlert:{hiddenSugars,cheapOils},
     ingredients,
     detectedAllergens,
-    additives: ocrResult?.additives || [
-      { code: "E500ii", name: "Sodium Hydrogen Carbonate (Baking Soda)", safety: "Safe", explanation: "Standard raising agent." },
-      { code: "E322", name: "Soy Lecithin", safety: "Safe", explanation: "Natural emulsifier." }
+    additives,
+    healthHighlights:[
+      {type:sugarStatus==='RED'?'warning':'info',label:sugarStatus==='RED'?'High Sugar':'Sugar Level',description:`${nutrition.sugar}g sugar per 100g/available serving basis.`},
+      {type:novaLevel===4?'warning':'info',label:novaGroup.label,description:novaGroup.description}
     ],
-    healthHighlights: [
-      { type: sugarStatus === 'RED' ? 'warning' : 'good', label: sugarStatus === 'RED' ? 'High Sugar' : 'Low Sugar', description: `${nutrition.sugar}g sugar per serving.` },
-      { type: novaLevel === 4 ? 'warning' : 'good', label: novaGroup.label, description: novaGroup.description }
-    ],
-    summary: `${productName} by ${brandName} analyzed. Truth Score ${truthRating.score}/5.0. ${novaGroup.label}.`,
-    rawOcrText: ocrResult?.rawOcrText || dbData?.ingredientsText || `Exact OCR matching completed for ${productName}`,
-    confidence: {
-      productName: Math.round(nameConfidence * 100) / 100,
-      ingredients: 0.94,
-      nutrition: 0.92,
-      allergens: 0.90,
-      overall: 0.94
-    },
-    sources: {
-      productName: productNameSource,
-      brandName: 'EXTERNAL_DATABASE',
-      ingredients: 'EXTERNAL_DATABASE',
-      nutrition: 'EXTERNAL_DATABASE',
-      allergens: 'EXTERNAL_DATABASE',
-      additives: 'EXTERNAL_DATABASE'
-    },
-    missingFields,
-    uncertaintyWarnings,
-    isValidated: true
+    summary:`${productName} by ${brandName} analyzed using available package and/or barcode evidence. Verify warnings and allergens against the physical label.`,
+    rawOcrText,
+    confidence:{productName:Math.round(nameEvidence.confidence*100)/100,ingredients:Math.round((ingredientsEvidence.confidence||0)*100)/100,nutrition:Math.round(nutritionConfidence*100)/100,allergens:Math.round((allergenEvidence.confidence||0)*100)/100,overall:Math.round(overallConfidence*100)/100},
+    sources:{productName:nameEvidence.source || 'AI_ESTIMATE',brandName:brandEvidence.source || 'AI_ESTIMATE',ingredients:ingredientsEvidence.source || 'AI_ESTIMATE',nutrition:(Object.values(nutritionSources)[0] || 'AI_ESTIMATE') as DataSourceType,allergens:allergenEvidence.source || 'AI_ESTIMATE',additives:hasBarcodeEvidence&&dbData?.additives?.length?'BARCODE_DATABASE':ocrResult?.additives?.length?'PACKAGE_OCR':'AI_ESTIMATE'},
+    missingFields:[...missingFields],
+    uncertaintyWarnings:[...uncertaintyWarnings],
+    isValidated:Boolean(hasBarcodeEvidence || (nameEvidence.source==='PACKAGE_OCR' && nameEvidence.confidence>=0.9 && ingredients.length>0 && nutritionConfidence>=0.8))
   };
 };
