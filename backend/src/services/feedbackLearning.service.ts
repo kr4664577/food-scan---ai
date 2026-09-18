@@ -42,7 +42,7 @@ export async function getVerifiedCorrections(minVotes = 3): Promise<VerifiedCorr
     g.count++;g.users.add(row.userId);if(row.reviewStatus!=='PENDING')g.reviewed=true;groups.set(key,g); }
   return [...groups.values()].filter(g=>g.count>=minVotes&&g.users.size>=2).map(g=>({ correctedName:g.name,correctedBrand:g.brand,
     feedbackCount:g.count,uniqueUsers:g.users.size,confidence:Math.min(.99,.5+g.users.size*.1+Math.min(g.count,10)*.03),
-    status:g.reviewed?'REVIEWED':'PENDING_REVIEW' })).sort((a,b)=>b.feedbackCount-a.feedbackCount);
+    status:(g.reviewed?'REVIEWED':'PENDING_REVIEW') as VerifiedCorrection['status'] })).sort((a,b)=>b.feedbackCount-a.feedbackCount);
 }
 
 export async function reviewFeedback(feedbackId:string,status:'APPROVED'|'REJECTED',reviewNote?:string){
