@@ -22,16 +22,21 @@ app.use(helmet());
 
 const configuredOrigins = (process.env.FRONTEND_ORIGINS || '')
   .split(',')
-  .map((origin) => origin.trim())
+  .map((origin) => origin.trim().replace(/\/$/, ''))
   .filter(Boolean);
 
-const allowedOrigins = configuredOrigins.length > 0
-  ? configuredOrigins
-  : ['http://localhost:3000', 'http://localhost:5173'];
+const defaultOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'https://food-scan-6odbmulzi-krishna-project.vercel.app'
+];
+
+const allowedOrigins = Array.from(new Set([...defaultOrigins, ...configuredOrigins]));
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    const normalizedOrigin = origin?.replace(/\/$/, '');
+    if (!normalizedOrigin || allowedOrigins.includes(normalizedOrigin)) return callback(null, true);
     return callback(new Error('CORS origin not allowed'));
   },
   credentials: true
