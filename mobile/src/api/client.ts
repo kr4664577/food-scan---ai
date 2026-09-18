@@ -11,10 +11,7 @@ export const DEFAULT_API_URL = 'https://cap-verification-deeply-appointed.tryclo
 export const normalizeApiUrl = (rawUrl: string): string => {
   if (!rawUrl || typeof rawUrl !== 'string') return DEFAULT_API_URL;
   let cleaned = rawUrl.trim().replace(/\/+$/, '');
-  
-  // Strip trailing /health if user pasted full health endpoint
   cleaned = cleaned.replace(/\/health$/i, '');
-  
   if (!cleaned.endsWith('/api')) {
     cleaned = `${cleaned}/api`;
   }
@@ -22,45 +19,42 @@ export const normalizeApiUrl = (rawUrl: string): string => {
 };
 
 export const getApiBaseUrl = (): string => {
-  const envUrl = (import.meta as any).env?.VITE_API_URL;
-  if (envUrl) return normalizeApiUrl(envUrl);
-
   if (typeof window !== 'undefined') {
     const protocol = window.location?.protocol;
     const isCapacitor = protocol === 'capacitor:' || protocol === 'file:' || (window as any).Capacitor?.isNativePlatform?.();
 
+    // Production web app is deployed together with the Vercel serverless API.
+    // Always use same-origin /api so VITE_API_URL or an old saved tunnel URL
+    // cannot send browser requests to an external backend and trigger CORS errors.
+    if (!isCapacitor) {
+      return '/api';
+    }
+
+    const envUrl = (import.meta as any).env?.VITE_API_URL;
+    if (envUrl) return normalizeApiUrl(envUrl);
+
     const saved = localStorage.getItem('foodscan_api_url');
     if (saved) {
       const normalized = normalizeApiUrl(saved);
-      // If running inside native Android APK and the saved URL points to localhost or old LAN IP,
-      // upgrade to the verified HTTPS link so the phone connects immediately
-      if (isCapacitor && (normalized.includes('localhost') || normalized.includes('127.0.0.1') || normalized.includes('192.168.'))) {
+      if (normalized.includes('localhost') || normalized.includes('127.0.0.1') || normalized.includes('192.168.')) {
         return DEFAULT_API_URL;
       }
       return normalized;
     }
 
-    // Running inside native Capacitor Android APK: default to verified HTTPS link
-    if (isCapacitor) {
-      return DEFAULT_API_URL;
-    }
-
-    // In web browser (localhost, 127.0.0.1, or local network IP via Vite)
-    // Always use '/api' to route seamlessly through Vite reverse proxy to backend port 5001
-    return '/api';
+    return DEFAULT_API_URL;
   }
   return DEFAULT_API_URL;
 };
 
 export const apiClient = axios.create({
   baseURL: getApiBaseUrl(),
-  timeout: 60000, // 60s timeout for multimodal vision models
+  timeout: 60000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Development request logging interceptor
 apiClient.interceptors.request.use((config) => {
   const base = (config.baseURL || '').replace(/\/+$/, '');
   const path = (config.url || '').replace(/^\/+/, '');
@@ -69,7 +63,6 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// Development response & error logging interceptor
 apiClient.interceptors.response.use(
   (response) => {
     const base = (response.config.baseURL || '').replace(/\/+$/, '');
@@ -123,31 +116,22 @@ export interface ConnectionTestResult {
   elapsedMs: number;
 }
 
-/**
- * Diagnostics runner for testing backend connectivity.
- * Evaluates GET /api/health directly against the target base URL.
- */
 export const testBackendConnection = async (targetBaseUrl?: string): Promise<ConnectionTestResult> => {
   const base = normalizeApiUrl(targetBaseUrl || apiClient.defaults.baseURL || getApiBaseUrl());
-  // The health endpoint is at /health relative to /api (i.e. http://192.168.31.218:5001/api/health)
   const fullHealthUrl = `${base.replace(/\/+$/, '')}/health`;
   const method = 'GET';
-
-  console.log(`[Connection Test] Initiating ${method} ${fullHealthUrl} ...`);
   const startTime = Date.now();
 
   try {
     const res = await axios.get(fullHealthUrl, {
       timeout: 10000,
       headers: { Accept: 'application/json' },
-      validateStatus: () => true // Allow non-2xx status to distinguish HTTP errors from network down
+      validateStatus: () => true
     });
 
     const elapsedMs = Date.now() - startTime;
     const isOkStatus = res.status >= 200 && res.status < 300;
     const hasValidBody = res.data && (res.data.status === 'OK' || res.data.service || res.data.version);
-
-    console.log(`[Connection Test Result] ${method} ${fullHealthUrl} -> HTTP ${res.status} (${elapsedMs}ms)`, res.data);
 
     if (isOkStatus && hasValidBody) {
       return {
@@ -190,23 +174,18 @@ export const testBackendConnection = async (targetBaseUrl?: string): Promise<Con
     const elapsedMs = Date.now() - startTime;
     const exceptionType = err.name || 'Error';
     const rawError = err.message || String(err);
-    console.error(`[Connection Test Error] ${exceptionType} on ${method} ${fullHealthUrl} (${elapsedMs}ms):`, err);
-
     let failureType: ConnectionTestResult['type'] = 'NETWORK_FAILURE';
-    let userMsg = '';
+    let userMsg = `${exceptionType}: ${rawError}`;
 
     if (err.code === 'ECONNABORTED' || rawError.toLowerCase().includes('timeout')) {
       failureType = 'TIMEOUT';
-      userMsg = `Request timed out after 10s. Server port 5001 might be unresponsive or blocked by macOS firewall.`;
+      userMsg = `Request timed out after 10s.`;
     } else if (rawError.toLowerCase().includes('cleartext') || rawError.toLowerCase().includes('not permitted')) {
       failureType = 'NETWORK_FAILURE';
       userMsg = `Cleartext HTTP traffic was blocked by Android system policy.`;
     } else if (rawError === 'Network Error' || err.code === 'ERR_NETWORK') {
       failureType = 'NETWORK_FAILURE';
-      userMsg = `Network Error: Could not reach ${fullHealthUrl}. Ensure phone & Mac are connected to the same Wi-Fi network.`;
-    } else {
-      failureType = 'NETWORK_FAILURE';
-      userMsg = `${exceptionType}: ${rawError}`;
+      userMsg = `Network Error: Could not reach ${fullHealthUrl}.`;
     }
 
     return {
