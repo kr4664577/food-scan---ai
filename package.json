@@ -7,11 +7,11 @@
     "build:mobile": "npm --prefix mobile run build",
     "build:backend": "npm --prefix backend run build",
     "build": "npm run build:mobile && npm run build:backend",
-    "vercel-build": "npm --prefix backend install && npm --prefix backend run prisma:generate && npm --prefix mobile install && npm --prefix mobile run build",
+    "vercel-build": "npm --prefix backend install && npm --prefix backend run prisma:generate && npm --prefix mobile install && VITE_API_URL=/api npm --prefix mobile run build",
     "start": "node backend/dist/app.js"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.17.1",
+    "@google/generative-ai": "^0.17.0",
     "@prisma/client": "^5.19.0",
     "axios": "^1.7.5",
     "bcryptjs": "^2.4.3",
