@@ -1,6 +1,7 @@
 name: FoodScan Backend CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [v2-meal-portion-intelligence]
   pull_request:
