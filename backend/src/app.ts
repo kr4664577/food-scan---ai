@@ -36,7 +36,14 @@ const allowedOrigins = Array.from(new Set([...defaultOrigins, ...configuredOrigi
 app.use(cors({
   origin: (origin, callback) => {
     const normalizedOrigin = origin?.replace(/\/$/, '');
-    if (!normalizedOrigin || allowedOrigins.includes(normalizedOrigin)) return callback(null, true);
+    const isVercelPreview = !!normalizedOrigin && /^https:\/\/[^/]+\.vercel\.app$/i.test(normalizedOrigin);
+
+    // Allow the configured production origin and Vercel preview deployments.
+    // This prevents preview/alias deployments from failing browser CORS checks.
+    if (!normalizedOrigin || allowedOrigins.includes(normalizedOrigin) || isVercelPreview) {
+      return callback(null, true);
+    }
+
     return callback(new Error('CORS origin not allowed'));
   },
   credentials: true
