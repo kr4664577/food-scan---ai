@@ -35,13 +35,15 @@ export const INDIA_FOOD_CATALOG: IndiaFoodCatalogItem[] = [
   {name:'Besan Chilla',aliases:['besan chilla','besan cheela','chilla','cheela'],portionGrams:120,portionLabel:'2 medium chillas (~120g)',portionUnitCount:2,calories:220,protein:11,carbs:27,fat:7,fiber:5,sugar:3,sodium:300,saturatedFat:1,ingredients:['gram flour','onion','vegetables','spices','oil']}
 ];
 
+import { INDIA_FOOD_CATALOG_EXTENDED } from './indiaFoodCatalogExtended';
+const ALL_INDIA_FOOD_CATALOG: IndiaFoodCatalogItem[] = [...INDIA_FOOD_CATALOG, ...INDIA_FOOD_CATALOG_EXTENDED];
 const normalize=(value:string)=>value.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 const tokens=(value:string)=>new Set(normalize(value).split(/\s+/).filter(t=>t.length>=3));
 
 export const findIndiaFood=(query:string):IndiaFoodCatalogItem|null=>{
   const q=normalize(query); if(!q)return null;
-  for(const item of INDIA_FOOD_CATALOG){if(item.aliases.some(a=>q===normalize(a)||q.includes(normalize(a))))return item;}
+  for(const item of ALL_INDIA_FOOD_CATALOG){if(item.aliases.some(a=>q===normalize(a)||q.includes(normalize(a))))return item;}
   const qt=tokens(q); let best:IndiaFoodCatalogItem|null=null; let bestScore=0;
-  for(const item of INDIA_FOOD_CATALOG){const it=new Set(item.aliases.flatMap(a=>[...tokens(a)]));let hits=0;for(const t of qt)if(it.has(t))hits++;const score=hits/Math.max(1,Math.min(qt.size,it.size));if(score>=0.75&&score>bestScore){best=item;bestScore=score;}}
+  for(const item of ALL_INDIA_FOOD_CATALOG){const it=new Set(item.aliases.flatMap(a=>[...tokens(a)]));let hits=0;for(const t of qt)if(it.has(t))hits++;const score=hits/Math.max(1,Math.min(qt.size,it.size));if(score>=0.75&&score>bestScore){best=item;bestScore=score;}}
   return best;
 };
