@@ -4,7 +4,7 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
   try {
     const { imageBase64, fileName } = req.body;
 
-    if (!imageBase64 && !req.file) {
+    if (!imageBase64 && !(req as any).file) {
       return res.status(400).json({
         success: false,
         error: { message: 'No image data provided. Provide base64 data or multipart file.', statusCode: 400 }

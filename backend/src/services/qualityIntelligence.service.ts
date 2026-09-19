@@ -1,7 +1,15 @@
+import { GoogleGenAI } from '@google/genai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const apiKey = process.env.GEMINI_API_KEY || '';
-const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
+const getGeminiKey = () => process.env.GEMINI_API_KEY || '';
+const getGenAI = () => {
+  const key = getGeminiKey();
+  return key ? new GoogleGenerativeAI(key) : null;
+};
+const getGoogleGenAI = () => {
+  const key = getGeminiKey();
+  return key ? new GoogleGenAI({ apiKey: key, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } }) : null;
+};
 
 // Exact Final Result Categories Required by Specification
 export type QualityResultCategory =
@@ -73,8 +81,9 @@ export class GeminiQualityModelEngine implements IVisualQualityModelEngine {
   providerName = "Gemini Multi-Modal Vision Quality Engine (Pluggable CV Architecture)";
 
   async analyze(imageBase64: string, mimeType: string = 'image/jpeg'): Promise<QualityIntelligenceResult> {
-    if (!genAI || !imageBase64) {
-      throw new Error('Food image analysis failed. Please try again.');
+    const key = getGeminiKey();
+    if (!key || !imageBase64) {
+      throw new Error('Food image analysis failed. Gemini API key or image data missing.');
     }
 
     const { cleanBase64, mimeType: finalMimeType } = normalizeBase64Image(imageBase64, mimeType);
@@ -118,14 +127,30 @@ Return STRICT JSON ONLY (no markdown codeblock) matching schema:
 }`;
 
     const imagePart = { inlineData: { data: cleanBase64, mimeType: finalMimeType } };
-    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash'];
+    const modelsToTry = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+    const modernAI = getGoogleGenAI();
+    const legacyAI = getGenAI();
+    const errors: string[] = [];
 
     for (const modelName of modelsToTry) {
       try {
-        const model = genAI.getGenerativeModel({ model: modelName });
-        const result = await model.generateContent([prompt, imagePart]);
-        const response = await result.response;
-        const text = response.text() || '';
+        let text = '';
+        if (modernAI) {
+          const res = await modernAI.models.generateContent({
+            model: modelName,
+            contents: [
+              prompt,
+              { inlineData: { mimeType: finalMimeType, data: cleanBase64 } }
+            ],
+            config: { responseMimeType: 'application/json' }
+          });
+          text = (res.text || '').trim();
+        } else if (legacyAI) {
+          const model = legacyAI.getGenerativeModel({ model: modelName });
+          const result = await model.generateContent([prompt, imagePart]);
+          const response = await result.response;
+          text = response.text() || '';
+        }
 
         logSafeDebug({
           scanType: 'QUALITY_INSPECTION',
@@ -149,11 +174,13 @@ Return STRICT JSON ONLY (no markdown codeblock) matching schema:
           }
         }
       } catch (err: any) {
-        console.warn(`[Safe Debug] Gemini Quality Vision (${modelName}) failed:`, err.message || err);
+        const errMsg = err?.message || String(err);
+        errors.push(`${modelName}: ${errMsg}`);
+        console.warn(`[Safe Debug] Gemini Quality Vision (${modelName}) failed:`, errMsg);
       }
     }
 
-    throw new Error('Food image analysis failed. Please try again.');
+    throw new Error(`Food image analysis failed: ${errors.join(' | ')}`);
   }
 
   private formatAndSanitizeResult(raw: any): QualityIntelligenceResult {

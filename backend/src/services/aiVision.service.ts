@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { GoogleGenAI } from '@google/genai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const getGrokApiKey = () => process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
@@ -6,59 +7,89 @@ const getGeminiApiKey = () => process.env.GEMINI_API_KEY || '';
 
 import { normalizeBase64Image, normalizeImageInput, logSafeDebug } from './ai.service';
 
+// Active, supported Gemini vision models in priority order
+const GEMINI_VISION_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-flash-latest',
+  'gemini-3.1-flash-lite',
+  'gemini-2.5-flash'
+];
+
 /**
  * Unified Vision AI Engine
- * Supports Google Gemini Vision (and optional Grok 2 Vision)
+ * Supports Google Gemini Vision (@google/genai & fallback) and optional Grok 2 Vision
  */
 export const runUnifiedVisionAnalysis = async (params: {
   prompt: string;
   imageBase64: string;
   mimeType?: string;
   scanType?: string;
-}): Promise<any | null> => {
+}): Promise<any> => {
   const { prompt, imageBase64, mimeType = 'image/jpeg', scanType = 'VISION_ANALYSIS' } = params;
   
   let normalized;
   try {
     normalized = await normalizeImageInput(imageBase64, mimeType);
   } catch (err: any) {
+    console.error(`[Vision AI Error] Failed to normalize image for ${scanType}:`, err?.message || err);
     logSafeDebug({
       scanType,
       mimeType,
       base64Length: 0,
       parseError: 'Failed to normalize Base64 input'
     });
-    return null;
+    throw new Error(`Failed to process food image input: ${err?.message || 'Invalid image data'}`);
   }
 
   const { cleanBase64, mimeType: finalMimeType } = normalized;
 
+  console.log(`[Vision AI Request] ScanType: ${scanType}, MIME: ${finalMimeType}, Base64 Length: ${cleanBase64.length}`);
   logSafeDebug({
     scanType,
     mimeType: finalMimeType,
     base64Length: cleanBase64.length
   });
 
+  const geminiErrors: string[] = [];
+
   // 1. Try Google Gemini Vision if GEMINI_API_KEY is configured
   const geminiKey = getGeminiApiKey();
   if (geminiKey) {
-    const modelsToTry = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
-    for (const modelName of modelsToTry) {
+    const modernAI = new GoogleGenAI({
+      apiKey: geminiKey,
+      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+    });
+
+    for (const modelName of GEMINI_VISION_MODELS) {
       let attempts = 0;
       while (attempts < 2) {
         attempts++;
         try {
-          const genAI = new GoogleGenerativeAI(geminiKey);
-          const model = genAI.getGenerativeModel({
+          console.log(`[Gemini Vision] Attempting model: ${modelName} (attempt ${attempts}) for ${scanType}...`);
+          
+          // Try modern @google/genai SDK
+          const response = await modernAI.models.generateContent({
             model: modelName,
-            generationConfig: { responseMimeType: 'application/json' }
+            contents: [
+              prompt,
+              {
+                inlineData: {
+                  mimeType: finalMimeType,
+                  data: cleanBase64
+                }
+              }
+            ],
+            config: {
+              responseMimeType: 'application/json'
+            }
           });
-          const imagePart = { inlineData: { data: cleanBase64, mimeType: finalMimeType } };
 
-          const result = await model.generateContent([prompt, imagePart]);
-          const response = await result.response;
-          const text = (response.text() || '').trim();
+          const text = (response.text || '').trim();
+          if (!text) {
+            throw new Error(`Empty response received from ${modelName}`);
+          }
 
+          console.log(`[Gemini Vision Success] Model ${modelName} responded (length: ${text.length} chars)`);
           logSafeDebug({
             scanType,
             mimeType: finalMimeType,
@@ -66,7 +97,7 @@ export const runUnifiedVisionAnalysis = async (params: {
             geminiStatus: `HTTP 200 OK (${modelName})`
           });
 
-          // Direct parse if JSON format was enforced
+          // Direct parse if JSON format was returned
           try {
             const parsed = JSON.parse(text);
             return parsed;
@@ -80,26 +111,35 @@ export const runUnifiedVisionAnalysis = async (params: {
               if (jsonMatch) {
                 return JSON.parse(jsonMatch[0]);
               }
+              throw new Error(`Invalid JSON output: ${text.slice(0, 100)}...`);
             }
           }
         } catch (geminiErr: any) {
           const errMsg = geminiErr?.message || String(geminiErr);
-          console.warn(`[Safe Debug] Gemini Vision (${modelName}, attempt ${attempts}) error:`, errMsg);
-          if (errMsg.includes('503') || errMsg.includes('high demand')) {
-            // Wait 1 second and retry once before next model
-            await new Promise((r) => setTimeout(r, 1000));
+          const errStatus = geminiErr?.status || geminiErr?.code || 'ERROR';
+          const detailedMsg = `[${modelName} / ${errStatus}]: ${errMsg}`;
+          geminiErrors.push(detailedMsg);
+          console.warn(`[Gemini Vision Warning] ${modelName} attempt ${attempts} failed:`, errMsg);
+
+          // Retry on 503 high demand or 429 quota once after brief pause
+          if ((errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('429')) && attempts < 2) {
+            await new Promise((r) => setTimeout(r, 1200));
             continue;
           }
-          break; // Move to next model for non-transient errors
+          break; // Move to next fallback model
         }
       }
     }
+  } else {
+    geminiErrors.push('GEMINI_API_KEY is not set or empty in environment.');
+    console.warn('[Gemini Vision] GEMINI_API_KEY is missing from environment variables.');
   }
 
   // 2. Try xAI Grok 2 Vision if GROK_API_KEY is configured (fallback)
   const grokKey = getGrokApiKey();
   if (grokKey) {
     try {
+      console.log(`[Grok Vision] Attempting xAI Grok fallback for ${scanType}...`);
       const dataUrl = `data:${finalMimeType};base64,${cleanBase64}`;
       const response = await axios.post(
         'https://api.x.ai/v1/chat/completions',
@@ -141,15 +181,18 @@ export const runUnifiedVisionAnalysis = async (params: {
       }
     } catch (grokErr: any) {
       console.warn('⚠️ Grok Vision error:', grokErr?.response?.data || grokErr?.message);
+      geminiErrors.push(`Grok: ${grokErr?.message || String(grokErr)}`);
     }
   }
 
-  return null;
+  // If all vision engines failed, raise a detailed error instead of returning null
+  console.error('[Vision AI Fatal] All Vision models failed:', geminiErrors);
+  throw new Error(`Vision AI analysis failed. Models attempted: ${geminiErrors.join(' | ')}`);
 };
 
 /**
  * Unified Chatbot Engine
- * Supports xAI Grok and Google Gemini
+ * Supports Google Gemini and xAI Grok
  */
 export const runUnifiedChat = async (params: {
   systemPrompt: string;
@@ -157,7 +200,29 @@ export const runUnifiedChat = async (params: {
 }): Promise<string | null> => {
   const { systemPrompt, userMessage } = params;
 
-  // 1. Try Grok
+  // 1. Try Gemini
+  const geminiKey = getGeminiApiKey();
+  if (geminiKey) {
+    const modernAI = new GoogleGenAI({
+      apiKey: geminiKey,
+      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+    });
+
+    for (const modelName of GEMINI_VISION_MODELS) {
+      try {
+        const response = await modernAI.models.generateContent({
+          model: modelName,
+          contents: `${systemPrompt}\n\nUser Question: ${userMessage}`
+        });
+        const text = (response.text || '').trim();
+        if (text) return text;
+      } catch (e: any) {
+        console.warn(`Gemini chat (${modelName}) error:`, e?.message);
+      }
+    }
+  }
+
+  // 2. Try Grok fallback
   const grokKey = getGrokApiKey();
   if (grokKey) {
     try {
@@ -183,24 +248,6 @@ export const runUnifiedChat = async (params: {
       return response.data?.choices?.[0]?.message?.content || null;
     } catch (e: any) {
       console.warn('Grok chat error:', e?.message);
-    }
-  }
-
-  // 2. Try Gemini
-  const geminiKey = getGeminiApiKey();
-  if (geminiKey) {
-    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-1.5-flash'];
-    for (const modelName of modelsToTry) {
-      try {
-        const genAI = new GoogleGenerativeAI(geminiKey);
-        const model = genAI.getGenerativeModel({ model: modelName });
-        const result = await model.generateContent(`${systemPrompt}\n\nUser Question: ${userMessage}`);
-        const response = await result.response;
-        const text = response.text();
-        if (text) return text;
-      } catch (e: any) {
-        console.warn(`Gemini chat (${modelName}) error:`, e?.message);
-      }
     }
   }
 

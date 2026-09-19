@@ -29,14 +29,44 @@ export const getScanHistory = async (req: AuthenticatedRequest, res: Response, n
       }
     });
 
-    const formattedScans = scans.map(scan => ({
-      ...scan,
-      ingredients: scan.ingredients ? JSON.parse(scan.ingredients) : [],
-      detectedAllergens: scan.detectedAllergens ? JSON.parse(scan.detectedAllergens) : [],
-      additives: scan.additives ? JSON.parse(scan.additives) : [],
-      qualityAnalysis: scan.qualityAnalysis ? JSON.parse(scan.qualityAnalysis) : null,
-      isFavorite: scan.favorites.length > 0
-    }));
+    const formattedScans = scans.map((scan: any) => {
+      let ingredients = [];
+      try {
+        ingredients = typeof scan.ingredients === 'string' ? JSON.parse(scan.ingredients) : scan.ingredients || [];
+      } catch {
+        ingredients = [];
+      }
+
+      let detectedAllergens = [];
+      try {
+        detectedAllergens = typeof scan.detectedAllergens === 'string' ? JSON.parse(scan.detectedAllergens) : scan.detectedAllergens || [];
+      } catch {
+        detectedAllergens = [];
+      }
+
+      let additives = [];
+      try {
+        additives = typeof scan.additives === 'string' ? JSON.parse(scan.additives) : scan.additives || [];
+      } catch {
+        additives = [];
+      }
+
+      let qualityAnalysis = null;
+      try {
+        qualityAnalysis = typeof scan.qualityAnalysis === 'string' ? JSON.parse(scan.qualityAnalysis) : scan.qualityAnalysis;
+      } catch {
+        qualityAnalysis = null;
+      }
+
+      return {
+        ...scan,
+        ingredients,
+        detectedAllergens,
+        additives,
+        qualityAnalysis,
+        isFavorite: Boolean(scan.favorites && scan.favorites.length > 0)
+      };
+    });
 
     return res.status(200).json({
       success: true,
@@ -62,18 +92,52 @@ export const getFavorites = async (req: AuthenticatedRequest, res: Response, nex
       orderBy: { createdAt: 'desc' }
     });
 
-    const formattedFavorites = favorites.map(fav => ({
-      favoriteId: fav.id,
-      savedAt: fav.createdAt,
-      scan: {
-        ...fav.scan,
-        ingredients: fav.scan.ingredients ? JSON.parse(fav.scan.ingredients) : [],
-        detectedAllergens: fav.scan.detectedAllergens ? JSON.parse(fav.scan.detectedAllergens) : [],
-        additives: fav.scan.additives ? JSON.parse(fav.scan.additives) : [],
-        qualityAnalysis: fav.scan.qualityAnalysis ? JSON.parse(fav.scan.qualityAnalysis) : null,
-        isFavorite: true
+    const formattedFavorites = favorites.map((fav: any) => {
+      let ingredients = [];
+      try {
+        ingredients = typeof fav.scan?.ingredients === 'string' ? JSON.parse(fav.scan.ingredients) : fav.scan?.ingredients || [];
+      } catch {
+        ingredients = [];
       }
-    }));
+
+      let detectedAllergens = [];
+      try {
+        detectedAllergens = typeof fav.scan?.detectedAllergens === 'string' ? JSON.parse(fav.scan.detectedAllergens) : fav.scan?.detectedAllergens || [];
+      } catch {
+        detectedAllergens = [];
+      }
+
+      let additives = [];
+      try {
+        additives = typeof fav.scan?.additives === 'string' ? JSON.parse(fav.scan.additives) : fav.scan?.additives || [];
+      } catch {
+        additives = [];
+      }
+
+      let qualityAnalysis = null;
+      try {
+        qualityAnalysis = typeof fav.scan?.qualityAnalysis === 'string' ? JSON.parse(fav.scan.qualityAnalysis) : fav.scan?.qualityAnalysis;
+      } catch {
+        qualityAnalysis = null;
+      }
+
+      return {
+        id: fav.id,
+        favoriteId: fav.id,
+        userId: fav.userId,
+        scanId: fav.scanId,
+        savedAt: fav.createdAt,
+        createdAt: fav.createdAt,
+        scan: {
+          ...fav.scan,
+          ingredients,
+          detectedAllergens,
+          additives,
+          qualityAnalysis,
+          isFavorite: true
+        }
+      };
+    });
 
     return res.status(200).json({
       success: true,
@@ -111,6 +175,33 @@ export const toggleFavorite = async (req: AuthenticatedRequest, res: Response, n
       });
       return res.status(200).json({ success: true, isFavorite: true, message: 'Added to favorites' });
     }
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const removeFavorite = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.userId;
+    const scanId = req.params.scanId;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, error: { message: 'Unauthorized', statusCode: 401 } });
+    }
+    if (!scanId) {
+      return res.status(400).json({ success: false, error: { message: 'scanId is required', statusCode: 400 } });
+    }
+
+    const existing = await prisma.favorite.findUnique({
+      where: {
+        userId_scanId: { userId, scanId }
+      }
+    });
+
+    if (existing) {
+      await prisma.favorite.delete({ where: { id: existing.id } });
+    }
+    return res.status(200).json({ success: true, isFavorite: false, message: 'Removed from favorites' });
   } catch (error) {
     next(error);
   }

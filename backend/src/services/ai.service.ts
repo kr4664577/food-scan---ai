@@ -1,8 +1,16 @@
 import axios from 'axios';
+import { GoogleGenAI } from '@google/genai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const apiKey = process.env.GEMINI_API_KEY || '';
-const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
+const getGeminiKey = () => process.env.GEMINI_API_KEY || '';
+const getGenAI = () => {
+  const key = getGeminiKey();
+  return key ? new GoogleGenerativeAI(key) : null;
+};
+const getGoogleGenAI = () => {
+  const key = getGeminiKey();
+  return key ? new GoogleGenAI({ apiKey: key, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } }) : null;
+};
 
 export interface PackagedAnalysisResult {
   productName: string;
@@ -166,7 +174,7 @@ export function logSafeDebug(info: {
   }
 }
 
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
+const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
 
 export const analyzePackagedFoodImage = async (
   imageBase64: string,
@@ -179,9 +187,12 @@ export const analyzePackagedFoodImage = async (
     base64Length: normalized.cleanBase64.length
   });
 
-  if (!genAI) {
+  const modernAI = getGoogleGenAI();
+  const legacyAI = getGenAI();
+
+  if (!modernAI && !legacyAI) {
     console.error('[Safe Debug] Gemini API Key is missing');
-    throw new Error('Food image analysis failed. Please try again.');
+    throw new Error('Food image analysis failed. Gemini API key is missing.');
   }
 
   const prompt = `You are an expert AI food scientist. Analyze the food packaging image(s). Extract text (OCR), ingredients, nutrition facts, and additives. Return STRICT JSON with keys:
@@ -204,18 +215,30 @@ export const analyzePackagedFoodImage = async (
     }
   };
 
+  const errors: string[] = [];
+
   for (const modelName of GEMINI_MODELS) {
     let attempts = 0;
     while (attempts < 2) {
       attempts++;
       try {
-        const model = genAI.getGenerativeModel({
-          model: modelName,
-          generationConfig: { responseMimeType: 'application/json' }
-        });
-        const result = await model.generateContent([prompt, imagePart]);
-        const response = await result.response;
-        const text = (response.text() || '').trim();
+        let text = '';
+        if (modernAI) {
+          const res = await modernAI.models.generateContent({
+            model: modelName,
+            contents: [prompt, imagePart],
+            config: { responseMimeType: 'application/json' }
+          });
+          text = (res.text || '').trim();
+        } else if (legacyAI) {
+          const model = legacyAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: { responseMimeType: 'application/json' }
+          });
+          const result = await model.generateContent([prompt, imagePart]);
+          const response = await result.response;
+          text = (response.text() || '').trim();
+        }
 
         logSafeDebug({
           scanType: 'PACKAGED_FOOD',
@@ -239,8 +262,9 @@ export const analyzePackagedFoodImage = async (
         }
       } catch (err: any) {
         const errMsg = err?.message || String(err);
+        errors.push(`${modelName}: ${errMsg}`);
         console.warn(`[Safe Debug] Gemini Vision (${modelName}, attempt ${attempts}) failed:`, errMsg);
-        if (errMsg.includes('503') || errMsg.includes('high demand')) {
+        if (errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('429')) {
           await new Promise((r) => setTimeout(r, 1000));
           continue;
         }
@@ -249,7 +273,7 @@ export const analyzePackagedFoodImage = async (
     }
   }
 
-  throw new Error('Food image analysis failed. Please try again.');
+  throw new Error(`Food image analysis failed: ${errors.join(' | ')}`);
 };
 
 export const analyzeMealImage = async (
@@ -263,9 +287,12 @@ export const analyzeMealImage = async (
     base64Length: normalized.cleanBase64.length
   });
 
-  if (!genAI) {
+  const modernAI = getGoogleGenAI();
+  const legacyAI = getGenAI();
+
+  if (!modernAI && !legacyAI) {
     console.error('[Safe Debug] Gemini API Key is missing');
-    throw new Error('Food image analysis failed. Please try again.');
+    throw new Error('Food image analysis failed. Gemini API key is missing.');
   }
 
   const prompt = `You are an AI nutrition expert. Analyze this photo of restaurant or homemade food. Identify items, estimate portion sizes, calories, and macronutrients. Return STRICT JSON with keys:
@@ -286,18 +313,30 @@ export const analyzeMealImage = async (
     }
   };
 
+  const errors: string[] = [];
+
   for (const modelName of GEMINI_MODELS) {
     let attempts = 0;
     while (attempts < 2) {
       attempts++;
       try {
-        const model = genAI.getGenerativeModel({
-          model: modelName,
-          generationConfig: { responseMimeType: 'application/json' }
-        });
-        const result = await model.generateContent([prompt, imagePart]);
-        const response = await result.response;
-        const text = (response.text() || '').trim();
+        let text = '';
+        if (modernAI) {
+          const res = await modernAI.models.generateContent({
+            model: modelName,
+            contents: [prompt, imagePart],
+            config: { responseMimeType: 'application/json' }
+          });
+          text = (res.text || '').trim();
+        } else if (legacyAI) {
+          const model = legacyAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: { responseMimeType: 'application/json' }
+          });
+          const result = await model.generateContent([prompt, imagePart]);
+          const response = await result.response;
+          text = (response.text() || '').trim();
+        }
 
         logSafeDebug({
           scanType: 'MEAL',
@@ -321,8 +360,9 @@ export const analyzeMealImage = async (
         }
       } catch (err: any) {
         const errMsg = err?.message || String(err);
+        errors.push(`${modelName}: ${errMsg}`);
         console.warn(`[Safe Debug] Gemini Meal Vision (${modelName}, attempt ${attempts}) failed:`, errMsg);
-        if (errMsg.includes('503') || errMsg.includes('high demand')) {
+        if (errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('429')) {
           await new Promise((r) => setTimeout(r, 1000));
           continue;
         }
@@ -331,7 +371,7 @@ export const analyzeMealImage = async (
     }
   }
 
-  throw new Error('Food image analysis failed. Please try again.');
+  throw new Error(`Food image analysis failed: ${errors.join(' | ')}`);
 };
 
 export const analyzeVisualQualityImage = async (
@@ -345,9 +385,12 @@ export const analyzeVisualQualityImage = async (
     base64Length: normalized.cleanBase64.length
   });
 
-  if (!genAI) {
+  const modernAI = getGoogleGenAI();
+  const legacyAI = getGenAI();
+
+  if (!modernAI && !legacyAI) {
     console.error('[Safe Debug] Gemini API Key is missing');
-    throw new Error('Food image analysis failed. Please try again.');
+    throw new Error('Food image analysis failed. Gemini API key is missing.');
   }
 
   const prompt = `You are an AI visual food quality inspector. Check ONLY visible signs of spoilage (mold, unusual discoloration, foreign objects, packaging tearing/dents).
@@ -368,18 +411,30 @@ Return STRICT JSON:
     }
   };
 
+  const errors: string[] = [];
+
   for (const modelName of GEMINI_MODELS) {
     let attempts = 0;
     while (attempts < 2) {
       attempts++;
       try {
-        const model = genAI.getGenerativeModel({
-          model: modelName,
-          generationConfig: { responseMimeType: 'application/json' }
-        });
-        const result = await model.generateContent([prompt, imagePart]);
-        const response = await result.response;
-        const text = (response.text() || '').trim();
+        let text = '';
+        if (modernAI) {
+          const res = await modernAI.models.generateContent({
+            model: modelName,
+            contents: [prompt, imagePart],
+            config: { responseMimeType: 'application/json' }
+          });
+          text = (res.text || '').trim();
+        } else if (legacyAI) {
+          const model = legacyAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: { responseMimeType: 'application/json' }
+          });
+          const result = await model.generateContent([prompt, imagePart]);
+          const response = await result.response;
+          text = (response.text() || '').trim();
+        }
 
         logSafeDebug({
           scanType: 'QUALITY_INSPECTION',
@@ -415,8 +470,9 @@ Return STRICT JSON:
         }
       } catch (err: any) {
         const errMsg = err?.message || String(err);
+        errors.push(`${modelName}: ${errMsg}`);
         console.warn(`[Safe Debug] Gemini Quality Vision (${modelName}, attempt ${attempts}) failed:`, errMsg);
-        if (errMsg.includes('503') || errMsg.includes('high demand')) {
+        if (errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('429')) {
           await new Promise((r) => setTimeout(r, 1000));
           continue;
         }
@@ -425,5 +481,5 @@ Return STRICT JSON:
     }
   }
 
-  throw new Error('Food image analysis failed. Please try again.');
+  throw new Error(`Food image analysis failed: ${errors.join(' | ')}`);
 };

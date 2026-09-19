@@ -52,7 +52,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
           email: user.email,
           fullName: user.fullName,
           dietaryGoals: user.dietaryGoals,
-          allergies: user.allergies.map(a => a.allergen)
+          allergies: user.allergies.map((a: any) => a.allergen)
         }
       }
     });
@@ -107,7 +107,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
           email: user.email,
           fullName: user.fullName,
           dietaryGoals: user.dietaryGoals,
-          allergies: user.allergies.map(a => a.allergen)
+          allergies: user.allergies.map((a: any) => a.allergen)
         }
       }
     });
@@ -139,7 +139,7 @@ export const getProfile = async (req: AuthenticatedRequest, res: Response, next:
         email: user.email,
         fullName: user.fullName,
         dietaryGoals: user.dietaryGoals,
-        allergies: user.allergies.map(a => a.allergen)
+        allergies: user.allergies.map((a: any) => a.allergen)
       }
     });
   } catch (error) {
@@ -156,7 +156,7 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response, ne
       return res.status(401).json({ success: false, error: { message: 'Unauthorized', statusCode: 401 } });
     }
 
-    const updatedUser = await prisma.$transaction(async (tx) => {
+    const updatedUser = await prisma.$transaction(async (tx: any) => {
       if (Array.isArray(allergies)) {
         await tx.userAllergy.deleteMany({ where: { userId } });
       }
@@ -181,7 +181,7 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response, ne
         email: updatedUser.email,
         fullName: updatedUser.fullName,
         dietaryGoals: updatedUser.dietaryGoals,
-        allergies: updatedUser.allergies.map(a => a.allergen)
+        allergies: updatedUser.allergies.map((a: any) => a.allergen)
       }
     });
   } catch (error) {
