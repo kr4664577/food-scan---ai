@@ -1,12 +1,8 @@
 import path from 'path';
-import { fileURLToPath } from 'url';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import backendApp from './backend/src/app';
 import { seedFoodDatabase } from './backend/src/db/seedFoods';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const PORT = 3000;
