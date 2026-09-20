@@ -1,6 +1,5 @@
 import axios from 'axios';
 import { GoogleGenAI } from '@google/genai';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const getGrokApiKey = () => process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
 const getGeminiApiKey = () => process.env.GEMINI_API_KEY || '';
@@ -71,13 +70,13 @@ export const runUnifiedVisionAnalysis = async (params: {
           const response = await modernAI.models.generateContent({
             model: modelName,
             contents: [
-              prompt,
               {
                 inlineData: {
                   mimeType: finalMimeType,
                   data: cleanBase64
                 }
-              }
+              },
+              { text: prompt }
             ],
             config: {
               responseMimeType: 'application/json'

@@ -139,8 +139,8 @@ Return STRICT JSON ONLY (no markdown codeblock) matching schema:
           const res = await modernAI.models.generateContent({
             model: modelName,
             contents: [
-              prompt,
-              { inlineData: { mimeType: finalMimeType, data: cleanBase64 } }
+              { inlineData: { mimeType: finalMimeType, data: cleanBase64 } },
+              { text: prompt }
             ],
             config: { responseMimeType: 'application/json' }
           });

@@ -58,6 +58,9 @@ interface AppState {
 }
 
 const initialToken = typeof window !== 'undefined' ? localStorage.getItem('foodscan_auth_token') : null;
+const getImageMimeType = (image: string): string | undefined =>
+  image.match(/^data:([^;,]+)[;,]/i)?.[1]?.toLowerCase();
+
 let initialUser: UserProfile | null = null;
 if (typeof window !== 'undefined') {
   try {
@@ -154,6 +157,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const response = await apiClient.post('/scan/packaged', {
         imageBase64: base64Image,
+        mimeType: getImageMimeType(base64Image),
         customItemName,
         foodCategory: currentCategory
       });
@@ -187,13 +191,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       console.log('[Meal Scan] Dispatching POST /scan/meal to backend ...');
       const response = await apiClient.post('/scan/meal', {
         imageBase64: base64Image,
+        mimeType: getImageMimeType(base64Image),
         customDishName,
         foodCategory: currentCategory
       });
       console.log('[Meal Scan] Backend responded with status:', response.status);
 
-      if (response.data?.success && response.data.data?.mealAnalysis) {
-        const mealAnalysis: MealFoodAnalysis = response.data.data.mealAnalysis;
+      const mealAnalysis: MealFoodAnalysis | undefined =
+        response.data?.data?.mealAnalysis || response.data?.data?.analysis;
+      if (response.data?.success && mealAnalysis) {
         console.log('[Meal Scan Success] Successfully parsed mealAnalysis:', mealAnalysis.detectedDishName, 'Calories:', mealAnalysis.totalNutrition?.calories);
         set({ activeMealReport: mealAnalysis, isLoading: false, currentScreen: 'MEAL_REPORT' });
         return true;
@@ -202,7 +208,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         console.warn('[Meal Scan Response Missing Analysis]', {
           status: response.status,
           success: response.data?.success,
-          hasMealAnalysis: !!response.data?.data?.mealAnalysis,
+          hasMealAnalysis: !!mealAnalysis,
           data: response.data
         });
         set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
@@ -236,7 +242,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeQualityReport: null
     });
     try {
-      const response = await apiClient.post('/scan/quality', { imageBase64: base64Image });
+      const response = await apiClient.post('/scan/quality', {
+        imageBase64: base64Image,
+        mimeType: getImageMimeType(base64Image)
+      });
       if (response.data?.success && response.data.data?.qualityResult) {
         const qualityResult: QualityAnalysis = response.data.data.qualityResult;
         set({ activeQualityReport: qualityResult, isLoading: false, currentScreen: 'QUALITY_REPORT' });
