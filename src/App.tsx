@@ -21,7 +21,21 @@ import { SettingsScreen } from './screens/15_SettingsScreen';
 import { PrivacyDisclaimerScreen } from './screens/16_PrivacyDisclaimerScreen';
 
 export const App: React.FC = () => {
-  const { currentScreen } = useAppStore();
+  const { currentScreen, authStatus, restoreSession, logout } = useAppStore();
+  React.useEffect(() => { void restoreSession(); }, [restoreSession]);
+
+  if (authStatus !== 'ready') return (
+    <main className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+      <section className="max-w-sm rounded-3xl bg-white shadow-sm p-8 text-center" aria-live="polite">
+        <h1 className="text-xl font-bold text-emerald-800">FoodScan AI</h1>
+        {authStatus === 'restoring' ? <p className="mt-4" role="status">Restoring your session…</p> : <>
+          <p className="mt-4">We couldn’t verify your session right now. Your saved login has not been removed.</p>
+          <button className="mt-6 rounded-xl bg-emerald-700 text-white px-5 py-3" onClick={() => void restoreSession()}>Try again</button>
+          <button className="block mx-auto mt-4 text-slate-600 underline" onClick={logout}>Sign out</button>
+        </>}
+      </section>
+    </main>
+  );
 
   const renderScreen = () => {
     switch (currentScreen) {

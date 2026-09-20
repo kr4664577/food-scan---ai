@@ -17,6 +17,8 @@ interface AppState {
   foodCategory: FoodCategory;
   token: string | null;
   user: UserProfile | null;
+  authStatus: 'restoring' | 'ready' | 'unavailable';
+  restoreSession: () => Promise<void>;
   capturedImage: string | null;
   capturedBarcode: string | null;
   
@@ -79,6 +81,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   foodCategory: 'HOME_FOOD',
   token: initialToken,
   user: initialUser,
+  authStatus: initialToken ? 'restoring' : 'ready',
+  restoreSession: async () => {
+    const token = get().token;
+    if (!token) { set({ authStatus: 'ready' }); return; }
+    set({ authStatus: 'restoring' });
+    try {
+      const response = await apiClient.get('/auth/me');
+      // Ignore a response from a session that was logged out/replaced in flight.
+      if (get().token !== token) return;
+      if (!response.data?.success || !response.data.data?.id) throw new Error('Invalid session response');
+      get().setUser(response.data.data, token);
+      set({ authStatus: 'ready', currentScreen: 'DASHBOARD' });
+    } catch (error: any) {
+      if (get().token !== token) return;
+      if (error.response?.status === 401) get().logout();
+      else set({ authStatus: 'unavailable' });
+    }
+  },
   capturedImage: null,
   capturedBarcode: null,
   
@@ -106,7 +126,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (user) localStorage.setItem('foodscan_user', JSON.stringify(user));
       else localStorage.removeItem('foodscan_user');
     }
-    set({ user, token });
+    set({ user, token, authStatus: 'ready' });
   },
 
   logout: () => {
@@ -115,7 +135,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       localStorage.removeItem('foodscan_auth_token');
       localStorage.removeItem('foodscan_user');
     }
-    set({ user: null, token: null, currentScreen: 'AUTH' });
+    set({ user: null, token: null, authStatus: 'ready', currentScreen: 'AUTH', history: [], favorites: [], activeMealReport: null, activePackagedReport: null, activeQualityReport: null, capturedImage: null, capturedBarcode: null, errorMessage: null });
   },
 
   processBarcodeScan: async (barcode: string) => {

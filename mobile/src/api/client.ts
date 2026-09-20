@@ -116,7 +116,7 @@ apiClient.interceptors.response.use(
     const base = (response.config.baseURL || '').replace(/\/+$/, '');
     const path = (response.config.url || '').replace(/^\/+/, '');
     const fullUrl = response.config.url?.startsWith('http') ? response.config.url : `${base}/${path}`;
-    console.log(`[HTTP Response] ${response.status} ${fullUrl}`, response.data);
+    console.log(`[HTTP Response] ${response.status} ${fullUrl}`);
     return response;
   },
   (error) => {
@@ -126,8 +126,6 @@ apiClient.interceptors.response.use(
     console.warn(`[HTTP Error] ${error.response?.status || 'Network Failed'} ${fullUrl}`, {
       status: error.response?.status,
       statusText: error.response?.statusText,
-      data: error.response?.data,
-      message: error.message
     });
     return Promise.reject(error);
   }

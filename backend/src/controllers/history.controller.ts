@@ -92,7 +92,7 @@ export const getFavorites = async (req: AuthenticatedRequest, res: Response, nex
       orderBy: { createdAt: 'desc' }
     });
 
-    const formattedFavorites = favorites.map((fav: any) => {
+    const formattedFavorites = favorites.filter((fav: any) => fav.scan?.userId === userId).map((fav: any) => {
       let ingredients = [];
       try {
         ingredients = typeof fav.scan?.ingredients === 'string' ? JSON.parse(fav.scan.ingredients) : fav.scan?.ingredients || [];
@@ -158,6 +158,11 @@ export const toggleFavorite = async (req: AuthenticatedRequest, res: Response, n
     }
     if (!scanId) {
       return res.status(400).json({ success: false, error: { message: 'scanId is required', statusCode: 400 } });
+    }
+
+    const scan = await prisma.scanHistory.findUnique({ where: { id: scanId } });
+    if (!scan || scan.userId !== userId) {
+      return res.status(404).json({ success: false, error: { message: 'Scan not found.', statusCode: 404 } });
     }
 
     const existing = await prisma.favorite.findUnique({
