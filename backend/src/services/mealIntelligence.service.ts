@@ -1,5 +1,6 @@
 import { runUnifiedVisionAnalysis } from './aiVision.service';
 import { findFoodInCatalog } from '../db/foodCatalog';
+import { recordScanDuration } from '../middlewares/scanTiming';
 
 export interface IdentifiedFoodItem {
   name: string;
@@ -113,6 +114,7 @@ CRITICAL REQUIREMENT: Return STRICT JSON ONLY (no markdown text) matching schema
 
   console.log('[Meal Intelligence Pipeline] Initiating AI Vision analysis...');
   const visionResult = await runUnifiedVisionAnalysis({ prompt, imageBase64, mimeType, scanType: 'MEAL' });
+  const nutritionStarted = performance.now();
 
   if (visionResult) {
     // 1. Resolve detected dish name
@@ -217,6 +219,7 @@ CRITICAL REQUIREMENT: Return STRICT JSON ONLY (no markdown text) matching schema
       calories: visionResult.totalNutrition.calories
     });
 
+    recordScanDuration('nutrition', performance.now() - nutritionStarted);
     return visionResult as MealIntelligenceResult;
   }
 

@@ -29,17 +29,21 @@ export interface UserProfile {
 }
 
 export interface PackagedFoodAnalysis {
+  foodClassification?: 'food';
+  nutritionBasis?: string;
+  servingSize?: string | null;
   productName: string;
   brandName?: string;
   barcode?: string;
   nutrition: {
-    calories: number;
-    proteins: number;
-    carbs: number;
-    fats: number;
-    sugar: number;
-    sodium: number;
-    saturatedFat: number;
+    calories: number | null;
+    proteins: number | null;
+    carbs: number | null;
+    fats: number | null;
+    sugar: number | null;
+    sodium: number | null;
+    saturatedFat: number | null;
+    fiber?: number | null;
   };
   healthHighlights: Array<{
     type: 'warning' | 'info' | 'good';
@@ -191,6 +195,12 @@ export interface QualityAnalysis {
 
 export interface ScanItem {
   id: string;
+  userId?: string;
+  barcode?: string;
+  isFood?: boolean;
+  isValid?: boolean;
+  status?: string;
+  qualityAnalysis?: { foodClassification?: string; [key: string]: unknown };
   scanType: 'PACKAGED' | 'MEAL' | 'QUALITY_INSPECTION';
   productName: string;
   brandName?: string;
@@ -206,4 +216,3 @@ export const SAFETY_DISCLAIMERS = {
   UNABLE_TO_DETERMINE: "Unable to determine food quality or safety from the provided image.",
   ESTIMATED_NUTRITION_NOTICE: "All caloric, portion, and nutrient values are estimates based on visual computer vision models."
 };
-

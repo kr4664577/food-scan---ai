@@ -21,37 +21,41 @@ export interface DataSourcesMap {
 }
 
 export interface PackagedIntelligenceResult {
+  foodClassification?: 'food';
+  nutritionBasis?: string;
+  servingSize?: string | null;
   productName: string;
   brandName?: string;
   barcode?: string;
   nutritionScore?: string;
   
   nutrition: {
-    calories: number;
-    proteins: number;
-    carbs: number;
-    fats: number;
-    sugar: number;
-    sodium: number;
-    saturatedFat: number;
+    calories: number | null;
+    proteins: number | null;
+    carbs: number | null;
+    fats: number | null;
+    sugar: number | null;
+    sodium: number | null;
+    saturatedFat: number | null;
+    fiber?: number | null;
   };
 
   // TruthIn Rating & Intelligence Suite
-  truthRating: {
+  truthRating?: {
     score: number; // e.g. 4.2 out of 5.0
     maxScore: number;
     ratingLabel: string;
     ratingColor: string;
   };
 
-  novaGroup: {
+  novaGroup?: {
     level: 1 | 2 | 3 | 4;
     label: string;
     description: string;
     badgeColor: string;
   };
 
-  trafficLight: {
+  trafficLight?: {
     overallStatus: 'GREEN' | 'YELLOW' | 'RED';
     sugarStatus: 'GREEN' | 'YELLOW' | 'RED';
     sodiumStatus: 'GREEN' | 'YELLOW' | 'RED';
@@ -259,6 +263,22 @@ export const runPackagedIntelligencePipeline = async (params: {
   let dbData: BarcodeProductResult | null = null;
   if (barcode) {
     dbData = await fetchBarcodeData(barcode);
+    // A barcode must never enter the OCR/catalog inference path. Retain unknown
+    // fields as null and return only the matched product's declared nutrients.
+    return {
+      productName: dbData.productName, brandName: dbData.brandName, barcode,
+      foodClassification: 'food', nutritionBasis: dbData.nutritionBasis, servingSize: dbData.servingSize,
+      nutrition: { calories: dbData.calories, proteins: dbData.proteins, carbs: dbData.carbs, fats: dbData.fats, fiber: dbData.fiber, sugar: dbData.sugar, sodium: dbData.sodium, saturatedFat: dbData.saturatedFat },
+      nutritionScore: dbData.nutritionScore,
+      truthRating: undefined, novaGroup: undefined, trafficLight: undefined,
+      healthierSwaps: [], hiddenIngredientsAlert: { hiddenSugars: [], cheapOils: [] },
+      ingredients: dbData.ingredientsList, detectedAllergens: dbData.detectedAllergens, additives: [], healthHighlights: [],
+      summary: 'Product data from Open Food Facts. Check the package label; missing information is not estimated.', rawOcrText: '',
+      confidence: { productName: 0, ingredients: 0, nutrition: 0, allergens: 0, overall: 0 },
+      sources: { productName: 'EXTERNAL_DATABASE', brandName: 'EXTERNAL_DATABASE', nutrition: 'EXTERNAL_DATABASE', ingredients: 'EXTERNAL_DATABASE', allergens: 'EXTERNAL_DATABASE', additives: 'EXTERNAL_DATABASE' },
+      missingFields: (['calories', 'proteins', 'carbs', 'fats', 'fiber', 'sugar', 'sodium', 'saturatedFat'] as const).filter(key => dbData![key] == null),
+      uncertaintyWarnings: ['Crowdsourced product data can be incomplete or outdated.'], isValidated: true,
+    };
   }
 
   let ocrResult: Partial<PackagedIntelligenceResult> | null = null;

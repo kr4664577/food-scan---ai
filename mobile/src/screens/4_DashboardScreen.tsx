@@ -1,10 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { averageCalories } from '../utils/historyStats';
+import { MealSuggestions } from '../components/MealSuggestions';
+import { ScanAnalytics } from '../components/ScanAnalytics';
 import { useAppStore } from '../store/useAppStore';
 import { QrCode, Utensils, Eye, ShieldAlert, Sparkles, ChevronRight, Activity, Flame, Search, Camera, ArrowRight, Zap, Info } from 'lucide-react';
 import { ScanMode } from '../types';
 
 export const DashboardScreen: React.FC = () => {
-  const { user, setScreen, setScanMode, history } = useAppStore();
+  const { user, token, setScreen, setScanMode, history, historyStatus, fetchHistory } = useAppStore();
+  useEffect(() => { void fetchHistory(); }, [user?.id, token, fetchHistory]);
+  const avgCalories = averageCalories(history, user?.id);
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -22,60 +27,6 @@ export const DashboardScreen: React.FC = () => {
     { id: 'HEALTHY', label: '💚 Healthy Choices' },
   ];
 
-  const featuredFoods = [
-    {
-      id: 'f1',
-      title: 'Avocado & Quinoa Power Bowl',
-      category: 'MEAL',
-      type: 'VEG',
-      calories: '420 kcal',
-      protein: '18g Protein',
-      score: '94/100 • Excellent',
-      scoreColor: 'text-emerald-700 bg-emerald-50 border-emerald-200',
-      highlights: ['High Fiber', 'Vegan'],
-      image: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=600&q=80',
-      description: 'Fresh avocado, edamame, cherry tomatoes & organic quinoa'
-    },
-    {
-      id: 'f2',
-      title: 'Organic High-Protein Trail Mix',
-      category: 'PACKAGED',
-      type: 'VEG',
-      calories: '280 kcal',
-      protein: '14g Protein',
-      score: '88/100 • Healthy',
-      scoreColor: 'text-emerald-700 bg-emerald-50 border-emerald-200',
-      highlights: ['High Protein', 'Rich Omega-3'],
-      image: 'https://images.unsplash.com/photo-1599599810769-bcde5a160d32?auto=format&fit=crop&w=600&q=80',
-      description: 'Raw almonds, dried cranberries, pumpkin seeds & walnuts'
-    },
-    {
-      id: 'f3',
-      title: 'Grilled Salmon & Asparagus Dish',
-      category: 'MEAL',
-      type: 'NON-VEG',
-      calories: '510 kcal',
-      protein: '36g Protein',
-      score: '96/100 • Superfood',
-      scoreColor: 'text-emerald-700 bg-emerald-50 border-emerald-200',
-      highlights: ['Lean Protein', 'Keto Friendly'],
-      image: 'https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&w=600&q=80',
-      description: 'Wild Atlantic salmon, lemon dill drizzle & roasted asparagus'
-    },
-    {
-      id: 'f4',
-      title: 'Dark Chocolate Almond Bar (85%)',
-      category: 'PACKAGED',
-      type: 'VEG',
-      calories: '210 kcal',
-      protein: '5g Protein',
-      score: '82/100 • Antioxidant Rich',
-      scoreColor: 'text-teal-700 bg-teal-50 border-teal-200',
-      highlights: ['Antioxidant Rich', 'Low Sugar'],
-      image: 'https://images.unsplash.com/photo-1549007994-cb92caebd54b?auto=format&fit=crop&w=600&q=80',
-      description: 'Single-origin cocoa bean, cocoa butter & sea salt'
-    }
-  ];
 
   return (
     <div className="pb-28 pt-3 px-4 space-y-5 max-w-md mx-auto">
@@ -144,7 +95,7 @@ export const DashboardScreen: React.FC = () => {
           </div>
 
           <h2 className="text-lg font-extrabold text-white leading-tight drop-shadow">
-            Scan Any Food in 2 Seconds 🥑
+            Understand Your Food 🥑
           </h2>
           <p className="text-xs text-slate-200 mt-1 max-w-[280px]">
             Detect ingredients, allergens, E-number additives & calorie distribution automatically.
@@ -158,7 +109,7 @@ export const DashboardScreen: React.FC = () => {
               Start AI Scan <ArrowRight size={14} />
             </button>
             <span className="text-[10px] text-slate-200 font-medium">
-              100% Private & Verified
+              Nutrition with context
             </span>
           </div>
         </div>
@@ -293,8 +244,9 @@ export const DashboardScreen: React.FC = () => {
             <Flame size={20} />
           </div>
           <div>
-            <span className="text-[10px] text-slate-400 block font-bold uppercase tracking-wider">Avg Calories</span>
-            <span className="text-base font-extrabold text-slate-900">1,840 kcal</span>
+            <span className="text-[10px] text-slate-400 block font-bold uppercase tracking-wider">AVG CALORIES</span>
+            <span className="text-base font-extrabold text-slate-900">{historyStatus === 'ready' ? `${avgCalories.toLocaleString(undefined, { maximumFractionDigits: 1 })} kcal` : historyStatus === 'error' ? 'Unavailable' : 'Loading…'}</span>
+            <span className="text-[9px] block text-slate-500">Per valid saved food scan, not daily intake</span>
           </div>
         </div>
 
@@ -304,74 +256,13 @@ export const DashboardScreen: React.FC = () => {
           </div>
           <div>
             <span className="text-[10px] text-slate-400 block font-bold uppercase tracking-wider">Total Scans</span>
-            <span className="text-base font-extrabold text-slate-900">{history.length} Saved</span>
+            <span className="text-base font-extrabold text-slate-900">{historyStatus === 'ready' ? `${history.length} Saved` : '—'}</span>
           </div>
         </div>
       </div>
 
-      {/* 7. Healthy Food Spotlight Showcase */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between px-1">
-          <div>
-            <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">Healthy Choices Spotlight</h3>
-            <p className="text-[10px] text-slate-500">Verified nutrient-dense foods & meal items</p>
-          </div>
-          <button
-            onClick={() => setScreen('FAVORITES')}
-            className="text-xs text-emerald-600 font-extrabold hover:underline"
-          >
-            View Saved
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          {featuredFoods.map((item) => (
-            <div
-              key={item.id}
-              className="food-card p-3.5 rounded-2xl flex gap-3.5 items-center cursor-pointer"
-              onClick={() => handleLaunchScan(item.category === 'MEAL' ? 'MEAL_PHOTO' : 'PACKAGED_BARCODE')}
-            >
-              <div className="relative w-24 h-24 rounded-xl overflow-hidden shrink-0 border border-slate-200 shadow-sm">
-                <img
-                  src={item.image}
-                  alt={item.title}
-                  className="w-full h-full object-cover"
-                />
-                <span className={`absolute top-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-extrabold border ${
-                  item.type === 'VEG' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-rose-100 text-rose-800 border-rose-300'
-                }`}>
-                  {item.type === 'VEG' ? '🟢 VEG' : '🔴 NON-VEG'}
-                </span>
-              </div>
-
-              <div className="flex-1 space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full border ${item.scoreColor}`}>
-                    {item.score}
-                  </span>
-                  <span className="text-[10px] font-bold text-slate-500">{item.calories}</span>
-                </div>
-
-                <h4 className="text-xs font-extrabold text-slate-900 leading-snug">{item.title}</h4>
-                <p className="text-[10px] text-slate-500 line-clamp-1">{item.description}</p>
-
-                <div className="flex items-center justify-between pt-1">
-                  <div className="flex flex-wrap gap-1">
-                    {item.highlights.map((h, idx) => (
-                      <span key={idx} className="text-[8px] font-bold bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
-                        {h}
-                      </span>
-                    ))}
-                  </div>
-                  <button className="bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white border border-emerald-200 text-[10px] font-extrabold px-3 py-1 rounded-lg transition shadow-sm">
-                    SCAN
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+      {historyStatus === 'ready' && <ScanAnalytics history={history} userId={user?.id} />}
+      <MealSuggestions goal={user?.dietaryGoals} allergies={user?.allergies} />
 
       {/* 8. Recent Scans Section */}
       <div className="space-y-3">
@@ -385,7 +276,7 @@ export const DashboardScreen: React.FC = () => {
           </button>
         </div>
 
-        {history.length === 0 ? (
+        {historyStatus === 'error' ? <button className="text-sm text-rose-700 underline" onClick={() => void fetchHistory()}>History could not be loaded. Retry</button> : history.length === 0 ? (
           <div className="food-card p-5 rounded-2xl text-center space-y-2">
             <Info size={24} className="mx-auto text-slate-400" />
             <p className="text-xs text-slate-500 font-medium">No previous food scans found.</p>

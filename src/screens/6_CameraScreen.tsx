@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { Camera, Image as ImageIcon, Sparkles, X, Flashlight, RefreshCw, QrCode, SwitchCamera, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { ScanMode } from '../types';
-import { convertUrlToBase64, resizeImage } from '../utils/imageUtils';
-import { detectBarcodeFromSource } from '../utils/barcodeDetector';
+import { prepareImage, imageOptions } from '../utils/imageUtils';
+import { beginCapture, imageReady } from '../utils/scanPerformance';
 
 export const CameraScreen: React.FC = () => {
   const { scanMode, setScanMode, setFoodCategory, setScreen, setCapturedImage, setCapturedBarcode } = useAppStore();
@@ -12,6 +12,8 @@ export const CameraScreen: React.FC = () => {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
 
+  const preparationRef = useRef(false);
+  const [isPreparing, setIsPreparing] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -143,77 +145,40 @@ export const CameraScreen: React.FC = () => {
     }
   };
 
-  // Capture Photo Handler (Live Camera snapshot or Preset)
-  const handleShutterCapture = async (presetUrl?: string) => {
-    let capturedBase64: string | null = null;
-
-    // If a preset was tapped, convert it to Base64
-    if (presetUrl) {
-      capturedBase64 = await convertUrlToBase64(presetUrl);
-    } else if (videoRef.current && isCameraActive) {
-      // If live camera is active, take snapshot from video stream
-      try {
-        const video = videoRef.current;
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth || 640;
-        canvas.height = video.videoHeight || 480;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          capturedBase64 = canvas.toDataURL('image/jpeg', 0.88);
-        }
-      } catch (err) {
-        console.error('Failed to capture frame from video:', err);
-      }
+  const prepareCapture = async (source: Blob | string | HTMLVideoElement) => {
+    if (preparationRef.current) return;
+    preparationRef.current = true;
+    setIsPreparing(true);
+    setCameraError(null);
+    beginCapture();
+    try {
+      // Let the preparing state paint before image decoding/encoding.
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      const options = imageOptions(scanMode);
+      const prepared = await prepareImage(source, options.maxDimension, options.quality);
+      imageReady(prepared);
+      setCapturedBarcode(null);
+      stopCamera();
+      setCapturedImage(prepared);
+      setScreen('IMAGE_PREVIEW');
+    } catch (error: any) {
+      setCameraError(error?.message || 'Unable to prepare this image. Please try another photo.');
+    } finally {
+      preparationRef.current = false;
+      setIsPreparing(false);
     }
-
-    // Fallback to sample photos if live snapshot unavailable
-    if (!capturedBase64) {
-      const fallbacks = [
-        'https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=600&auto=format&fit=crop&q=80', // Rotis & Bhaji
-        'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&auto=format&fit=crop&q=80', // Salmon Bowl
-        'https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=600&auto=format&fit=crop&q=80', // Curry & Rice
-        'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=600&auto=format&fit=crop&q=80'  // Pizza
-      ];
-      const randomUrl = fallbacks[Math.floor(Math.random() * fallbacks.length)];
-      capturedBase64 = await convertUrlToBase64(randomUrl);
-    }
-
-    // If in barcode mode, attempt to read barcode immediately from the frame
-    if (scanMode === 'PACKAGED_BARCODE') {
-      const detected = await detectBarcodeFromSource(capturedBase64);
-      if (detected) {
-        setCapturedBarcode(detected);
-      }
-    }
-
-    stopCamera();
-    setCapturedImage(capturedBase64);
-
-    // Transition to preview screen so user sees their captured photo
-    setScreen('IMAGE_PREVIEW');
   };
 
-  // File Upload Handler (Gallery / native photo picker)
+  const handleShutterCapture = async (presetUrl?: string) => {
+    if (presetUrl) return prepareCapture(presetUrl);
+    if (videoRef.current && isCameraActive) return prepareCapture(videoRef.current);
+    setCameraError('Camera is unavailable. Please select a photo from your gallery.');
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const rawBase64 = reader.result as string;
-        const optimizedBase64 = await resizeImage(rawBase64, 1024, 0.85);
-        if (scanMode === 'PACKAGED_BARCODE') {
-          const detected = await detectBarcodeFromSource(optimizedBase64);
-          if (detected) {
-            setCapturedBarcode(detected);
-          }
-        }
-        stopCamera();
-        setCapturedImage(optimizedBase64);
-        setScreen('IMAGE_PREVIEW');
-      };
-      reader.readAsDataURL(file);
-    }
+    e.target.value = '';
+    if (file) void prepareCapture(file);
   };
 
   const modeTitles: Record<ScanMode, string> = {
@@ -225,6 +190,7 @@ export const CameraScreen: React.FC = () => {
 
   return (
     <div className="relative min-h-screen bg-slate-950 text-white flex flex-col justify-between overflow-hidden">
+      {isPreparing && <div role="status" className="absolute inset-0 z-50 bg-slate-950/90 flex items-center justify-center text-emerald-300">Preparing your photo…</div>}
       {/* Top Camera Toolbar Header */}
       <div className="absolute top-0 left-0 right-0 z-30 p-4 flex items-center justify-between bg-gradient-to-b from-slate-950/90 via-slate-950/50 to-transparent backdrop-blur-sm">
         <button

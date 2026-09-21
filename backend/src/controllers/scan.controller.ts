@@ -4,6 +4,7 @@ import { runPackagedIntelligencePipeline } from '../services/packagedIntelligenc
 import { runMealIntelligencePipeline } from '../services/mealIntelligence.service';
 import { QualityInspectionEngineFactory } from '../services/qualityIntelligence.service';
 import { prisma } from '../config/db';
+import { timeScan } from '../middlewares/scanTiming';
 
 export const scanBarcode = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
@@ -17,16 +18,17 @@ export const scanBarcode = async (req: AuthenticatedRequest, res: Response, next
       });
     }
 
-    const analysis = await runPackagedIntelligencePipeline({ barcode });
+    const analysis = await timeScan('analysis', () => runPackagedIntelligencePipeline({ barcode }));
 
     // Save scan to database if authenticated
     let savedScan = null;
     if (userId) {
-      savedScan = await prisma.scanHistory.create({
+      savedScan = await timeScan<{ id: string }>('database', () => prisma.scanHistory.create({
         data: {
           userId,
           scanType: 'PACKAGED',
           barcode,
+          qualityAnalysis: JSON.stringify({ foodClassification: analysis.foodClassification, nutritionBasis: analysis.nutritionBasis, servingSize: analysis.servingSize, nutrition: analysis.nutrition }),
           productName: analysis.productName,
           brandName: analysis.brandName,
           calories: analysis.nutrition.calories,
@@ -42,7 +44,7 @@ export const scanBarcode = async (req: AuthenticatedRequest, res: Response, next
           additives: JSON.stringify(analysis.additives),
           confidenceScore: analysis.confidence.overall
         }
-      });
+      }));
     }
 
     return res.status(200).json({
@@ -74,16 +76,14 @@ export const scanPackagedImage = async (req: AuthenticatedRequest, res: Response
     console.log('[Scan Controller] Received packaged image scan request:', {
       imageLength: imageBase64.length,
       mimeType,
-      customItemName,
-      userId: userId || 'anonymous'
     });
 
-    const analysis = await runPackagedIntelligencePipeline({ imageBase64, mimeType, customItemName });
+    const analysis = await timeScan('analysis', () => runPackagedIntelligencePipeline({ imageBase64, mimeType, customItemName }));
 
     let savedScan = null;
     if (userId) {
       try {
-        savedScan = await prisma.scanHistory.create({
+        savedScan = await timeScan<{ id: string }>('database', () => prisma.scanHistory.create({
           data: {
             userId,
             scanType: 'PACKAGED',
@@ -102,7 +102,7 @@ export const scanPackagedImage = async (req: AuthenticatedRequest, res: Response
             additives: JSON.stringify(analysis.additives),
             confidenceScore: analysis.confidence.overall
           }
-        });
+        }));
       } catch (dbErr: any) {
         console.warn('[Scan Controller] Non-fatal DB save error for packaged scan:', dbErr?.message);
       }
@@ -117,17 +117,7 @@ export const scanPackagedImage = async (req: AuthenticatedRequest, res: Response
       }
     });
   } catch (error: any) {
-    const rawError = error?.message || String(error);
-    console.error('[Scan Controller Error] Packaged scan failed:', {
-      message: error?.message,
-      stack: error?.stack,
-      raw: rawError
-    });
-    return res.status(500).json({
-      success: false,
-      error: error?.message || 'Food image analysis failed. Please try again.',
-      details: rawError
-    });
+    next(error);
   }
 };
 
@@ -147,17 +137,15 @@ export const scanMealImage = async (req: AuthenticatedRequest, res: Response, ne
     console.log('[Scan Controller] Received meal image scan request:', {
       imageLength: imageBase64.length,
       mimeType,
-      customDishName,
       foodCategory,
-      userId: userId || 'anonymous'
     });
 
-    const mealAnalysis = await runMealIntelligencePipeline({ imageBase64, mimeType, customDishName, foodCategory });
+    const mealAnalysis = await timeScan('analysis', () => runMealIntelligencePipeline({ imageBase64, mimeType, customDishName, foodCategory }));
 
     let savedScan = null;
     if (userId) {
       try {
-        savedScan = await prisma.scanHistory.create({
+        savedScan = await timeScan<{ id: string }>('database', () => prisma.scanHistory.create({
           data: {
             userId,
             scanType: 'MEAL',
@@ -170,14 +158,13 @@ export const scanMealImage = async (req: AuthenticatedRequest, res: Response, ne
             confidenceScore: mealAnalysis.confidence.overall,
             qualityAnalysis: JSON.stringify({ items: mealAnalysis.items, summary: mealAnalysis.healthSummary })
           }
-        });
+        }));
       } catch (dbErr: any) {
         console.warn('[Scan Controller] Non-fatal DB save error for meal scan:', dbErr?.message);
       }
     }
 
     console.log('[Scan Controller] Meal scan successfully completed:', {
-      detectedDish: mealAnalysis.detectedDishName,
       itemsCount: mealAnalysis.items?.length,
       calories: mealAnalysis.totalNutrition?.calories
     });
@@ -192,17 +179,7 @@ export const scanMealImage = async (req: AuthenticatedRequest, res: Response, ne
       }
     });
   } catch (error: any) {
-    const rawError = error?.message || String(error);
-    console.error('[Scan Controller Error] Meal scan failed:', {
-      message: error?.message,
-      stack: error?.stack,
-      raw: rawError
-    });
-    return res.status(500).json({
-      success: false,
-      error: error?.message || 'Food image analysis failed. Please try again.',
-      details: rawError
-    });
+    next(error);
   }
 };
 
@@ -222,7 +199,6 @@ export const scanVisualQuality = async (req: AuthenticatedRequest, res: Response
     console.log('[Scan Controller] Received visual quality scan request:', {
       imageLength: imageBase64.length,
       mimeType,
-      userId: userId || 'anonymous'
     });
 
     const qualityResult = await QualityInspectionEngineFactory.getEngine().analyze(
@@ -233,7 +209,7 @@ export const scanVisualQuality = async (req: AuthenticatedRequest, res: Response
     let savedScan = null;
     if (userId) {
       try {
-        savedScan = await prisma.scanHistory.create({
+        savedScan = await timeScan<{ id: string }>('database', () => prisma.scanHistory.create({
           data: {
             userId,
             scanType: 'QUALITY_INSPECTION',
@@ -241,7 +217,7 @@ export const scanVisualQuality = async (req: AuthenticatedRequest, res: Response
             confidenceScore: qualityResult.overallConfidence,
             qualityAnalysis: JSON.stringify(qualityResult)
           }
-        });
+        }));
       } catch (dbErr: any) {
         console.warn('[Scan Controller] Non-fatal DB save error for quality scan:', dbErr?.message);
       }
@@ -256,16 +232,6 @@ export const scanVisualQuality = async (req: AuthenticatedRequest, res: Response
       }
     });
   } catch (error: any) {
-    const rawError = error?.message || String(error);
-    console.error('[Scan Controller Error] Quality scan failed:', {
-      message: error?.message,
-      stack: error?.stack,
-      raw: rawError
-    });
-    return res.status(500).json({
-      success: false,
-      error: error?.message || 'Food image analysis failed. Please try again.',
-      details: rawError
-    });
+    next(error);
   }
 };

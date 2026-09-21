@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { Search, Heart, Clock } from 'lucide-react';
 
 export const HistoryScreen: React.FC = () => {
-  const { history, toggleFavorite } = useAppStore();
+  const { history, historyStatus, token, user, fetchHistory, toggleFavorite } = useAppStore();
+  useEffect(() => { void fetchHistory(); }, [token, user?.id, fetchHistory]);
   const [filterType, setFilterType] = useState<'ALL' | 'PACKAGED' | 'MEAL' | 'QUALITY_INSPECTION'>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -45,6 +46,8 @@ export const HistoryScreen: React.FC = () => {
       </div>
 
       {/* Scans List */}
+      {historyStatus === 'loading' && <p role="status">Loading your history…</p>}
+      {historyStatus === 'error' && <button onClick={() => void fetchHistory()} className="text-rose-700 underline">Unable to load history. Retry</button>}
       <div className="space-y-3">
         {filteredHistory.length === 0 ? (
           <div className="food-card p-8 rounded-3xl text-center text-slate-500 space-y-2">
@@ -65,13 +68,13 @@ export const HistoryScreen: React.FC = () => {
                 <div>
                   <h4 className="text-xs font-extrabold text-slate-900">{item.productName}</h4>
                   <p className="text-[10px] text-slate-500 font-medium">
-                    {item.scanType} • {new Date(item.createdAt).toLocaleDateString()}
+                    {item.scanType} • {new Date(item.createdAt).toLocaleString()}
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-3">
-                {item.calories && (
+                {typeof item.calories === 'number' && Number.isFinite(item.calories) && (
                   <span className="text-xs font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200">
                     {item.calories} kcal
                   </span>

@@ -17,7 +17,8 @@ export const ImagePreviewScreen: React.FC = () => {
     processMealScan,
     processQualityScan,
     processBarcodeScan,
-    errorMessage
+    errorMessage,
+    isLoading
   } = useAppStore();
   
   const [customDishName, setCustomDishName] = useState('');
@@ -94,6 +95,7 @@ export const ImagePreviewScreen: React.FC = () => {
   };
 
   const handleConfirm = async () => {
+    if (useAppStore.getState().isLoading || isDetectingBarcode) return;
     setLocalError(null);
     if (!capturedImage && scanMode !== 'PACKAGED_BARCODE') return;
 
@@ -326,6 +328,7 @@ export const ImagePreviewScreen: React.FC = () => {
       <div className="space-y-2.5">
         <button
           onClick={handleConfirm}
+          disabled={isLoading || isDetectingBarcode}
           className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold text-base shadow-lg shadow-emerald-600/30 active:scale-[0.98] transition flex items-center justify-center gap-2"
         >
           Generate AI Food Report <Sparkles size={20} className="text-amber-300" />

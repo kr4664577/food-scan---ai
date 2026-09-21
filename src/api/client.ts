@@ -1,4 +1,11 @@
 import axios from 'axios';
+import { beginScanRequest, scanUploaded, scanResponse } from '../utils/scanPerformance';
+
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error === 'string' && error) return error;
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message;
+  return fallback;
+}
 
 // Default production URL for native mobile apps when no custom endpoint or VITE_API_URL is configured
 export const DEFAULT_MOBILE_API_URL = 'https://food-scan-ai-one.vercel.app/api';
@@ -103,6 +110,10 @@ export const apiClient = axios.create({
 
 // Request logging interceptor
 apiClient.interceptors.request.use((config) => {
+  if (config.method === 'post' && config.url?.startsWith('/scan/')) {
+    beginScanRequest();
+    config.onUploadProgress = (event) => { if (event.total && event.loaded >= event.total) scanUploaded(); };
+  }
   const base = (config.baseURL || '').replace(/\/+$/, '');
   const path = (config.url || '').replace(/^\/+/, '');
   const fullUrl = config.url?.startsWith('http') ? config.url : `${base}/${path}`;
@@ -113,6 +124,7 @@ apiClient.interceptors.request.use((config) => {
 // Response & error logging interceptor
 apiClient.interceptors.response.use(
   (response) => {
+    if (response.config.url?.startsWith('/scan/')) scanResponse(response.headers['server-timing'], response.data?.success === true);
     const base = (response.config.baseURL || '').replace(/\/+$/, '');
     const path = (response.config.url || '').replace(/^\/+/, '');
     const fullUrl = response.config.url?.startsWith('http') ? response.config.url : `${base}/${path}`;
@@ -120,6 +132,7 @@ apiClient.interceptors.response.use(
     return response;
   },
   (error) => {
+    if (error.config?.url?.startsWith('/scan/')) scanResponse(error.response?.headers?.['server-timing'], false);
     const base = (error.config?.baseURL || '').replace(/\/+$/, '');
     const path = (error.config?.url || '').replace(/^\/+/, '');
     const fullUrl = error.config?.url?.startsWith('http') ? error.config?.url : `${base}/${path}`;

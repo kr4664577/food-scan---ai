@@ -1,8 +1,19 @@
 import axios from 'axios';
 import { GoogleGenAI } from '@google/genai';
+import { timeScan } from '../middlewares/scanTiming';
 
 const getGrokApiKey = () => process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
 const getGeminiApiKey = () => process.env.GEMINI_API_KEY || '';
+let client: GoogleGenAI | undefined;
+let clientKey: string | undefined;
+const visionClient = (apiKey: string) => {
+  if (!client || clientKey !== apiKey) {
+    clientKey = apiKey;
+    // This service owns retries. SDK defaults must not multiply our attempts.
+    client = new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'aistudio-build' }, retryOptions: { attempts: 1 } } });
+  }
+  return client;
+};
 
 import { normalizeBase64Image, normalizeImageInput, logSafeDebug } from './ai.service';
 
@@ -28,7 +39,7 @@ export const runUnifiedVisionAnalysis = async (params: {
   
   let normalized;
   try {
-    normalized = await normalizeImageInput(imageBase64, mimeType);
+    normalized = await timeScan('normalize', () => normalizeImageInput(imageBase64, mimeType));
   } catch (err: any) {
     console.error(`[Vision AI Error] Failed to normalize image for ${scanType}:`, err?.message || err);
     logSafeDebug({
@@ -54,20 +65,21 @@ export const runUnifiedVisionAnalysis = async (params: {
   // 1. Try Google Gemini Vision if GEMINI_API_KEY is configured
   const geminiKey = getGeminiApiKey();
   if (geminiKey) {
-    const modernAI = new GoogleGenAI({
-      apiKey: geminiKey,
-      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
-    });
+    const modernAI = visionClient(geminiKey);
+    let requestCount = 0;
+    let transientRetries = 0;
 
     for (const modelName of GEMINI_VISION_MODELS) {
+      if (requestCount >= 5) break;
       let attempts = 0;
-      while (attempts < 2) {
+      while (attempts < 2 && requestCount < 5) {
         attempts++;
+        requestCount++;
         try {
           console.log(`[Gemini Vision] Attempting model: ${modelName} (attempt ${attempts}) for ${scanType}...`);
           
           // Try modern @google/genai SDK
-          const response = await modernAI.models.generateContent({
+          const response = await timeScan('gemini', () => modernAI.models.generateContent({
             model: modelName,
             contents: [
               {
@@ -81,7 +93,7 @@ export const runUnifiedVisionAnalysis = async (params: {
             config: {
               responseMimeType: 'application/json'
             }
-          });
+          }));
 
           const text = (response.text || '').trim();
           if (!text) {
@@ -98,7 +110,7 @@ export const runUnifiedVisionAnalysis = async (params: {
 
           // Direct parse if JSON format was returned
           try {
-            const parsed = JSON.parse(text);
+            const parsed = await timeScan('ai_parse', async () => JSON.parse(text));
             return parsed;
           } catch (e) {
             // Strip code fences or extract object if wrapped
@@ -110,18 +122,25 @@ export const runUnifiedVisionAnalysis = async (params: {
               if (jsonMatch) {
                 return JSON.parse(jsonMatch[0]);
               }
-              throw new Error(`Invalid JSON output: ${text.slice(0, 100)}...`);
+              throw new Error('Invalid JSON output from vision provider.');
             }
           }
         } catch (geminiErr: any) {
           const errMsg = geminiErr?.message || String(geminiErr);
           const errStatus = geminiErr?.status || geminiErr?.code || 'ERROR';
-          const detailedMsg = `[${modelName} / ${errStatus}]: ${errMsg}`;
+          const detailedMsg = `[${modelName} / ${Number(errStatus) || 'ERROR'}]`;
           geminiErrors.push(detailedMsg);
-          console.warn(`[Gemini Vision Warning] ${modelName} attempt ${attempts} failed:`, errMsg);
+          console.warn(`[Gemini Vision Warning] ${modelName} attempt ${attempts} failed (status ${Number(errStatus) || 'ERROR'}).`);
+          // Authentication/quota failures are not cured by rapid duplicate calls.
+          if ([401, 403, 429].includes(Number(errStatus))) {
+            const error = new Error(Number(errStatus) === 429 ? 'AI service is busy or its quota is exhausted. Please try again later.' : 'AI service is unavailable. Please try again later.');
+            Object.assign(error, { statusCode: Number(errStatus) === 429 ? 429 : 503, publicMessage: error.message });
+            throw error;
+          }
 
           // Retry on 503 high demand or 429 quota once after brief pause
-          if ((errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('429')) && attempts < 2) {
+          if ((Number(errStatus) === 503 || Number(errStatus) === 500) && attempts < 2 && transientRetries < 1) {
+            transientRetries++;
             await new Promise((r) => setTimeout(r, 1200));
             continue;
           }

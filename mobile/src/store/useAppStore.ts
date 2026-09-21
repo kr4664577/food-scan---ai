@@ -9,7 +9,7 @@ import {
   QualityAnalysis,
   ScanItem
 } from '../types';
-import { apiClient, setAuthToken } from '../api/client';
+import { apiClient, setAuthToken, apiErrorMessage } from '../api/client';
 interface AppState {
   currentScreen: ScreenType;
   previousScreen: ScreenType | null;
@@ -27,6 +27,7 @@ interface AppState {
   activeQualityReport: QualityAnalysis | null;
   
   history: ScanItem[];
+  historyStatus: 'idle' | 'loading' | 'ready' | 'error';
   favorites: ScanItem[];
   isLoading: boolean;
   errorMessage: string | null;
@@ -107,6 +108,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeQualityReport: null,
   
   history: [],
+  historyStatus: 'idle',
   favorites: [],
   isLoading: false,
   errorMessage: null,
@@ -126,7 +128,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (user) localStorage.setItem('foodscan_user', JSON.stringify(user));
       else localStorage.removeItem('foodscan_user');
     }
-    set({ user, token, authStatus: 'ready' });
+    set(state => ({ user, token, authStatus: 'ready', ...(state.user?.id !== user?.id ? { history: [], favorites: [], historyStatus: 'idle' as const, activeMealReport: null, activePackagedReport: null, activeQualityReport: null } : {}) }));
   },
 
   logout: () => {
@@ -135,10 +137,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       localStorage.removeItem('foodscan_auth_token');
       localStorage.removeItem('foodscan_user');
     }
-    set({ user: null, token: null, authStatus: 'ready', currentScreen: 'AUTH', history: [], favorites: [], activeMealReport: null, activePackagedReport: null, activeQualityReport: null, capturedImage: null, capturedBarcode: null, errorMessage: null });
+    set({ user: null, token: null, authStatus: 'ready', currentScreen: 'AUTH', isLoading: false, historyStatus: 'idle', history: [], favorites: [], activeMealReport: null, activePackagedReport: null, activeQualityReport: null, capturedImage: null, capturedBarcode: null, errorMessage: null });
   },
 
   processBarcodeScan: async (barcode: string) => {
+    if (get().isLoading) return false;
+    const scanToken = get().token;
     set({
       isLoading: true,
       errorMessage: null,
@@ -148,17 +152,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     try {
       const response = await apiClient.post('/scan/barcode', { barcode });
+      if (get().token !== scanToken) return false;
       if (response.data?.success && response.data.data?.analysis) {
         const analysis: PackagedFoodAnalysis = response.data.data.analysis;
         set({ activePackagedReport: analysis, isLoading: false, currentScreen: 'PACKAGED_REPORT' });
         return true;
       } else {
-        const errorMsg = response.data?.error || 'Food barcode lookup failed. Please try again.';
+        const errorMsg = response.data?.error?.message || (typeof response.data?.error === 'string' ? response.data.error : 'Food barcode lookup failed. Please try again.');
         set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
         return false;
       }
     } catch (err: any) {
-      const errorMsg = err.response?.data?.error || 'Food barcode lookup failed. Please try again.';
+      if (get().token !== scanToken) return false;
+      const errorMsg = err.response?.data?.error?.message || (typeof err.response?.data?.error === 'string' ? err.response.data.error : 'Food barcode lookup failed. Please try again.');
       console.warn('Barcode scan error:', errorMsg);
       set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
       return false;
@@ -166,6 +172,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   processPackagedScan: async (base64Image: string, customItemName?: string, foodCategory?: FoodCategory) => {
+    if (get().isLoading) return false;
+    const scanToken = get().token;
     set({
       isLoading: true,
       errorMessage: null,
@@ -181,17 +189,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         customItemName,
         foodCategory: currentCategory
       });
+      if (get().token !== scanToken) return false;
       if (response.data?.success && response.data.data?.analysis) {
         const analysis: PackagedFoodAnalysis = response.data.data.analysis;
         set({ activePackagedReport: analysis, isLoading: false, currentScreen: 'PACKAGED_REPORT' });
         return true;
       } else {
-        const errorMsg = response.data?.details || response.data?.error || 'Food image analysis failed. Please try again.';
+        const errorMsg = apiErrorMessage(response.data?.error, 'Food image analysis failed. Please try again.');
         set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
         return false;
       }
     } catch (err: any) {
-      const errorMsg = err.response?.data?.details || err.response?.data?.error || (err.message === 'Network Error' || !err.response ? 'Cannot reach backend server. Ensure phone & Mac are on the same Wi-Fi, or check Server URL in Settings.' : 'Food image analysis failed. Please try again.');
+      if (get().token !== scanToken) return false;
+      const errorMsg = apiErrorMessage(err.response?.data?.error, !err.response ? 'Cannot reach the server. Please check your connection.' : 'Food image analysis failed. Please try again.');
       console.warn('Packaged scan error:', errorMsg);
       set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
       return false;
@@ -199,6 +209,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   processMealScan: async (base64Image: string, customDishName?: string, foodCategory?: FoodCategory) => {
+    if (get().isLoading) return false;
+    const scanToken = get().token;
     set({
       isLoading: true,
       errorMessage: null,
@@ -215,45 +227,41 @@ export const useAppStore = create<AppState>((set, get) => ({
         customDishName,
         foodCategory: currentCategory
       });
+      if (get().token !== scanToken) return false;
       console.log('[Meal Scan] Backend responded with status:', response.status);
 
       const mealAnalysis: MealFoodAnalysis | undefined =
         response.data?.data?.mealAnalysis || response.data?.data?.analysis;
       if (response.data?.success && mealAnalysis) {
-        console.log('[Meal Scan Success] Successfully parsed mealAnalysis:', mealAnalysis.detectedDishName, 'Calories:', mealAnalysis.totalNutrition?.calories);
+        console.log('[Meal Scan Success] Report ready.');
         set({ activeMealReport: mealAnalysis, isLoading: false, currentScreen: 'MEAL_REPORT' });
         return true;
       } else {
-        const errorMsg = response.data?.details || response.data?.error || 'Food image analysis failed. Please try again.';
+        const errorMsg = apiErrorMessage(response.data?.error, 'Food image analysis failed. Please try again.');
         console.warn('[Meal Scan Response Missing Analysis]', {
           status: response.status,
           success: response.data?.success,
           hasMealAnalysis: !!mealAnalysis,
-          data: response.data
         });
         set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
         return false;
       }
     } catch (err: any) {
+      if (get().token !== scanToken) return false;
       const status = err.response?.status;
       const statusText = err.response?.statusText;
       const backendError = err.response?.data?.error || err.response?.data?.message || err.response?.data?.details;
-      const errorMsg = err.response?.data?.details || err.response?.data?.error || (err.message === 'Network Error' || !err.response ? 'Cannot reach backend server. Please verify network connectivity.' : `Food image analysis failed (HTTP ${status || 'Err'}): ${backendError || err.message}`);
+      const errorMsg = apiErrorMessage(err.response?.data?.error, !err.response ? 'Cannot reach the server. Please check your connection.' : 'Food image analysis failed. Please try again.');
       
-      console.error('[Meal Scan Request Failed]', {
-        endpoint: '/scan/meal',
-        httpStatus: status,
-        statusText,
-        backendError,
-        responseData: err.response?.data,
-        errorMessage: err.message
-      });
+      console.warn('[Meal Scan Request Failed]', { httpStatus: status });
       set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
       return false;
     }
   },
 
   processQualityScan: async (base64Image: string) => {
+    if (get().isLoading) return false;
+    const scanToken = get().token;
     set({
       isLoading: true,
       errorMessage: null,
@@ -266,17 +274,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         imageBase64: base64Image,
         mimeType: getImageMimeType(base64Image)
       });
+      if (get().token !== scanToken) return false;
       if (response.data?.success && response.data.data?.qualityResult) {
         const qualityResult: QualityAnalysis = response.data.data.qualityResult;
         set({ activeQualityReport: qualityResult, isLoading: false, currentScreen: 'QUALITY_REPORT' });
         return true;
       } else {
-        const errorMsg = response.data?.details || response.data?.error || 'Food image analysis failed. Please try again.';
+        const errorMsg = apiErrorMessage(response.data?.error, 'Food image analysis failed. Please try again.');
         set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
         return false;
       }
     } catch (err: any) {
-      const errorMsg = err.response?.data?.details || err.response?.data?.error || (err.message === 'Network Error' || !err.response ? 'Cannot reach backend server. Ensure phone & Mac are on the same Wi-Fi, or check Server URL in Settings.' : 'Food image analysis failed. Please try again.');
+      if (get().token !== scanToken) return false;
+      const errorMsg = apiErrorMessage(err.response?.data?.error, !err.response ? 'Cannot reach the server. Please check your connection.' : 'Food image analysis failed. Please try again.');
       console.warn('Quality scan error:', errorMsg);
       set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
       return false;
@@ -284,13 +294,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   fetchHistory: async () => {
+    const token = get().token;
+    const userId = get().user?.id;
+    if (!token || !userId || userId === 'guest') { set({ history: [], historyStatus: 'ready' }); return; }
+    set({ historyStatus: 'loading' });
     try {
       const res = await apiClient.get('/history/scans');
-      if (res.data?.success) {
-        set({ history: res.data.data });
-      }
+      if (get().token !== token || get().user?.id !== userId) return;
+      if (!res.data?.success || !Array.isArray(res.data.data)) throw new Error('History unavailable');
+      set({ history: res.data.data.filter((scan: ScanItem) => scan.userId === userId), historyStatus: 'ready' });
     } catch (err) {
-      console.warn('Fetch history error:', err);
+      if (get().token === token) set({ historyStatus: 'error' });
     }
   },
 
@@ -308,15 +322,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updateUserProfile: async (data) => {
+    const token = get().token;
     set({ isLoading: true });
     try {
       const res = await apiClient.put('/auth/me', data);
-      if (res.data?.success) {
-        set({ user: res.data.data, isLoading: false });
-      }
-    } catch (err) {
-      console.warn('Update profile error:', err);
+      if (get().token !== token) return;
+      if (!res.data?.success || !res.data.data?.id) throw new Error('Profile update failed');
+      get().setUser(res.data.data, token);
       set({ isLoading: false });
+    } catch (err) {
+      set({ isLoading: false });
+      throw new Error('Profile update failed. Please try again.');
     }
   },
 

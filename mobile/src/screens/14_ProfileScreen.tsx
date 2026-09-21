@@ -1,9 +1,19 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { LogOut, ShieldCheck, User } from 'lucide-react';
+import { USER_GOALS } from '../utils/mealIdeas';
 
 export const ProfileScreen: React.FC = () => {
-  const { user, logout } = useAppStore();
+  const { user, token, logout, updateUserProfile } = useAppStore();
+  const [goal, setGoal] = useState(user?.dietaryGoals || USER_GOALS[0]);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const saveGoal = async () => {
+    setSaving(true); setMessage('');
+    try { await updateUserProfile({ dietaryGoals: goal }); setMessage('Goal updated.'); }
+    catch { setMessage('Your goal could not be saved. Please try again.'); }
+    finally { setSaving(false); }
+  };
 
   return (
     <div className="pb-28 pt-4 px-4 space-y-4 max-w-md mx-auto">
@@ -15,8 +25,8 @@ export const ProfileScreen: React.FC = () => {
           </div>
         </div>
 
-        <h2 className="text-xl font-extrabold text-slate-900">{user?.fullName || 'Alex Morgan'}</h2>
-        <p className="text-xs text-slate-500 mb-3">{user?.email || 'alex.foodie@foodscan.ai'}</p>
+        <h2 className="text-xl font-extrabold text-slate-900">{user?.fullName || 'Guest'}</h2>
+        <p className="text-xs text-slate-500 mb-3">{user?.email || 'Sign in to save your profile'}</p>
 
         <button
           onClick={logout}
@@ -27,13 +37,23 @@ export const ProfileScreen: React.FC = () => {
       </div>
 
       {/* Account Info Card */}
+      <section className="p-5 rounded-3xl border bg-white space-y-3">
+        <label htmlFor="nutrition-goal" className="block font-bold">Your nutrition goal</label>
+        <select id="nutrition-goal" value={goal} onChange={e => setGoal(e.target.value)} className="w-full rounded-xl border p-3 bg-white">
+          {!USER_GOALS.some(value => value === goal) && <option value={goal}>{goal || 'Choose a goal'}</option>}
+          {USER_GOALS.map(value => <option key={value}>{value}</option>)}
+        </select>
+        <p className="text-xs text-slate-500">Choose what matters to you. You can change this later; no health condition or nutrient target is inferred.</p>
+        <button disabled={!token || saving} onClick={() => void saveGoal()} className="px-4 py-2 rounded-xl bg-emerald-700 text-white disabled:opacity-50">{saving ? 'Saving…' : 'Save goal'}</button>
+        <p role="status" className="text-sm">{!token ? 'Sign in to save a goal.' : message}</p>
+      </section>
       <div className="food-card p-5 rounded-3xl space-y-3 bg-white border border-slate-200 shadow-sm">
         <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
           <User size={16} className="text-emerald-600" /> Account Overview
         </h3>
         <div className="flex justify-between items-center py-2.5 border-b border-slate-100 text-xs">
           <span className="text-slate-500 font-medium">Member Status</span>
-          <span className="text-emerald-700 font-extrabold bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">Pro Active</span>
+          <span className="text-emerald-700 font-extrabold bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">{token ? 'Signed in' : 'Guest'}</span>
         </div>
         <div className="flex justify-between items-center py-2.5 text-xs">
           <span className="text-slate-500 font-medium">AI Intelligence Pipeline</span>
@@ -45,4 +65,3 @@ export const ProfileScreen: React.FC = () => {
     </div>
   );
 };
-

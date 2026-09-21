@@ -12,6 +12,7 @@ import { getScanHistory } from './controllers/history.controller';
 import { authenticateJWT } from './middlewares/auth.middleware';
 import { errorHandler } from './middlewares/error.middleware';
 import { seedFoodDatabase } from './db/seedFoods';
+import { scanTiming, bodyParsed } from './middlewares/scanTiming';
 
 dotenv.config();
 
@@ -48,11 +49,14 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+    exposedHeaders: ['Server-Timing', 'X-Scan-AI-Attempts']
   })
 );
 
+app.use(scanTiming);
 app.use(express.json({ limit: '15mb' }));
+app.use(bodyParsed);
 
 // Rate Limiting
 const limiter = rateLimit({

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { AlertTriangle, CheckCircle2, Heart, ShieldAlert, Sparkles, FileText, Camera, Star, ArrowRight, Info, AlertOctagon, Flame, Bot } from 'lucide-react';
 import { AIChatbotModal } from '../components/AIChatbotModal';
+import { BarcodeNutritionReport } from '../components/BarcodeNutritionReport';
 
 export const PackagedReportScreen: React.FC = () => {
   const { activePackagedReport, setScreen } = useAppStore();
@@ -25,6 +26,7 @@ export const PackagedReportScreen: React.FC = () => {
   }
 
   const report = activePackagedReport;
+  if (report.foodClassification === 'food' && report.barcode) return <BarcodeNutritionReport report={report} onScan={() => setScreen('CAMERA')} />;
 
   const truthScore = report.truthRating?.score || 2.8;
 
@@ -241,7 +243,7 @@ export const PackagedReportScreen: React.FC = () => {
 
           <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-200">
             <span className="text-[9px] text-slate-500 block font-black uppercase">Sugar</span>
-            <span className={`text-sm font-black ${report.nutrition.sugar > 15 ? 'text-amber-600' : 'text-slate-900'}`}>
+            <span className={`text-sm font-black ${typeof report.nutrition.sugar === 'number' && report.nutrition.sugar > 15 ? 'text-amber-600' : 'text-slate-900'}`}>
               {report.nutrition.sugar}g
             </span>
             <span className="text-[9px] text-slate-400 block font-medium">sweet</span>

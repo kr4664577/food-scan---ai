@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAppStore } from './store/useAppStore';
+import { scanRendered } from './utils/scanPerformance';
 import { Header } from './components/Header';
 import { BottomNavigation } from './components/BottomNavigation';
 
@@ -23,6 +24,13 @@ import { PrivacyDisclaimerScreen } from './screens/16_PrivacyDisclaimerScreen';
 export const App: React.FC = () => {
   const { currentScreen, authStatus, restoreSession, logout } = useAppStore();
   React.useEffect(() => { void restoreSession(); }, [restoreSession]);
+  React.useEffect(() => {
+    if (!['MEAL_REPORT', 'PACKAGED_REPORT', 'QUALITY_REPORT'].includes(currentScreen)) return;
+    // Two frames approximate the first presented report, rather than React setState time.
+    let second = 0;
+    const first = requestAnimationFrame(() => { second = requestAnimationFrame(scanRendered); });
+    return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
+  }, [currentScreen]);
 
   if (authStatus !== 'ready') return (
     <main className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
