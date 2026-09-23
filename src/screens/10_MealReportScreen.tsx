@@ -1,439 +1,61 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import {
-  Info,
-  Flame,
-  Sparkles,
-  Camera,
-  Edit3,
-  Plus,
-  Trash2,
-  HelpCircle,
-  RefreshCw,
-  CheckCircle2,
-  AlertTriangle,
-  ChevronDown,
-  Bot,
-  ArrowRight
-} from 'lucide-react';
+import { AlertTriangle, Bot, Camera, Edit3, Plus, Trash2 } from 'lucide-react';
 import { AIChatbotModal } from '../components/AIChatbotModal';
+import { MacroBreakdown, NutritionRating } from '../components/NutritionVisuals';
+import { contextualMealIdeas, emptyMealNutrition, formatNutrient, NUTRIENT_KEYS } from '../utils/mealNutrition';
+import type { MealNutrition } from '../types';
 
+const labels: Record<keyof MealNutrition, string> = { calories: 'Calories (kcal)', protein: 'Protein (g)', carbs: 'Carbohydrates (g)', fat: 'Fat (g)', fiber: 'Fiber (g)', sugar: 'Total sugar (g)', sodium: 'Sodium (mg)', saturatedFat: 'Saturated fat (g)' };
 export const MealReportScreen: React.FC = () => {
-  const {
-    activeMealReport,
-    foodCategory,
-    setScreen,
-    updateMealDishName,
-    scaleMealPortion,
-    addMealItem,
-    removeMealItem
-  } = useAppStore();
-
-  const [isEditingDish, setIsEditingDish] = useState(false);
-  const [customDishInput, setCustomDishInput] = useState('');
-  const [activePortionScale, setActivePortionScale] = useState<number>(1.0);
-  const [showAddItemModal, setShowAddItemModal] = useState(false);
-  const [newItemName, setNewItemName] = useState('');
-  const [newItemPortion, setNewItemPortion] = useState('1 Serving (~100g)');
-  const [newItemCalories, setNewItemCalories] = useState(120);
-  const [isChatOpen, setIsChatOpen] = useState(false);
-
-  if (!activeMealReport) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 text-center">
-        <h3 className="text-base font-bold text-slate-800 mb-2">No Active Meal Report</h3>
-        <p className="text-xs text-slate-500 mb-6">Scan a homemade or restaurant meal to see item breakdown & macros.</p>
-        <button
-          onClick={() => setScreen('CAMERA')}
-          className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow transition"
-        >
-          Open Scanner
-        </button>
-      </div>
-    );
-  }
-
-  const report = activeMealReport;
-
-  const dishTitle = report.detectedDishName || "Scanned Meal";
-  const totals = report.totalNutrition || { calories: 340, protein: 11, carbs: 48, fat: 12, fiber: 9, sugar: 4, sodium: 500 };
-  const overallConfidence = report.confidence?.overall || 0.92;
-  const isLowConfidence = overallConfidence < 0.85;
-
-  const quickDishSuggestions = [
-    "Whole Wheat Rotis & Bhaji",
-    "Paneer Butter Masala & Naan",
-    "Hyderabadi Spiced Biryani",
-    "Whole Wheat Butter Biscuits",
-    "Crispy Masala Dosa",
-    "Margherita Pizza"
-  ];
-
-  const handleApplyCustomDish = (nameToUse?: string) => {
-    const finalName = nameToUse || customDishInput;
-    if (!finalName.trim()) return;
-    updateMealDishName(finalName.trim());
-    setIsEditingDish(false);
-    setCustomDishInput('');
+  const { activeMealReport: report, user, capturedImage, setScreen, updateMealDishName, processMealScan, scaleMealPortion, addMealItem, removeMealItem } = useAppStore();
+  const [editing, setEditing] = useState(false);
+  const [dish, setDish] = useState('');
+  const [scale, setScale] = useState(1);
+  const [showAdd, setShowAdd] = useState(false);
+  const [name, setName] = useState('');
+  const [portion, setPortion] = useState('');
+  const [values, setValues] = useState<Partial<Record<keyof MealNutrition, string>>>({});
+  const [chat, setChat] = useState(false);
+  if (!report) return <div className="p-6 text-center space-y-4"><h1 className="font-bold">No active meal report</h1><p>Scan a food photo to see available nutrition.</p><button className="rounded-xl bg-emerald-700 text-white p-3" onClick={() => setScreen('CAMERA')}>Open scanner</button></div>;
+  const totals = report.totalNutrition || emptyMealNutrition();
+  const confidence = report.confidence?.overall;
+  const uncertain = typeof confidence !== 'number' || confidence <= 0 || confidence < 0.85;
+  const ideas = contextualMealIdeas(report, user?.dietaryGoals);
+  const addItem = (event: React.FormEvent) => {
+    event.preventDefault(); if (!name.trim()) return;
+    const nutrition = emptyMealNutrition();
+    for (const key of NUTRIENT_KEYS) { const input = values[key]?.trim(); nutrition[key] = input && Number.isFinite(Number(input)) && Number(input) >= 0 ? Number(input) : null; }
+    addMealItem(name.trim(), portion.trim() || null, nutrition);
+    setName(''); setPortion(''); setValues({}); setShowAdd(false);
   };
-
-  const handlePortionSelect = (scale: number) => {
-    const factor = scale / activePortionScale;
-    setActivePortionScale(scale);
-    scaleMealPortion(factor);
-  };
-
-  const handleAddNewItemSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newItemName.trim()) return;
-    addMealItem(
-      newItemName.trim(),
-      newItemPortion,
-      Number(newItemCalories) || 100,
-      Math.round((newItemCalories * 0.08) * 10) / 10,
-      Math.round((newItemCalories * 0.12) * 10) / 10,
-      Math.round((newItemCalories * 0.04) * 10) / 10
-    );
-    setShowAddItemModal(false);
-    setNewItemName('');
-  };
-
-  return (
-    <div className="pb-28 pt-4 px-4 space-y-4 max-w-md mx-auto">
-      {/* Solution 5: AI Unsure / Low Confidence Guidance Banner */}
-      {isLowConfidence ? (
-        <div className="p-4 rounded-2xl bg-amber-500 text-white shadow-lg space-y-2.5">
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={20} className="shrink-0 animate-bounce" />
-            <h4 className="text-xs font-black uppercase tracking-wider">AI Unsure • Please Verify Dish Name</h4>
-          </div>
-          <p className="text-[11px] opacity-90 leading-snug">
-            The photo has ambiguous visual lighting or non-standard layout. Please confirm your exact dish name below or tap an option.
-          </p>
-
-          <div className="flex flex-wrap gap-1.5 pt-1">
-            {quickDishSuggestions.slice(0, 3).map((dish, i) => (
-              <button
-                key={i}
-                onClick={() => handleApplyCustomDish(dish)}
-                className="bg-white/20 hover:bg-white text-white hover:text-amber-950 px-2.5 py-1 rounded-lg text-[10px] font-bold transition border border-white/30"
-              >
-                {dish}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-2 pt-1">
-            <button
-              onClick={() => setIsEditingDish(true)}
-              className="flex-1 bg-white text-amber-950 py-1.5 rounded-xl text-xs font-black text-center shadow"
-            >
-              ✏️ Type Correct Dish Name
-            </button>
-            <button
-              onClick={() => setScreen('CAMERA')}
-              className="px-3 bg-amber-950/40 hover:bg-amber-950 text-white py-1.5 rounded-xl text-xs font-bold flex items-center gap-1"
-            >
-              <RefreshCw size={12} /> Retake
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-2xl flex items-center justify-between text-xs text-emerald-900 font-bold">
-          <span className="flex items-center gap-1.5">
-            <CheckCircle2 size={16} className="text-emerald-600" />
-            Category: <strong className="uppercase font-black text-emerald-700">{foodCategory?.replace('_', ' ') || 'HOME FOOD'}</strong>
-          </span>
-          <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-extrabold shadow-sm">
-            Sub-Second AI Match
-          </span>
-        </div>
-      )}
-
-      {/* Solution 1: Identification & Dish Correction Header Card */}
-      <div className="food-card p-5 rounded-3xl relative overflow-hidden bg-white shadow-sm border border-slate-200">
-        <div className="flex items-start justify-between mb-2">
-          <div className="flex-1 pr-2">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                {Math.round(overallConfidence * 100)}% Visual Match Confidence
-              </span>
-              <span className="text-[10px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                {report.items?.length || 1} Sub-Items
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2 mt-1">
-              <h2 className="text-xl font-black text-slate-900 leading-tight">
-                {dishTitle}
-              </h2>
-              <button
-                onClick={() => setIsEditingDish(!isEditingDish)}
-                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-emerald-100 text-slate-600 hover:text-emerald-700 flex items-center justify-center transition shrink-0"
-                title="Edit / Re-classify Dish"
-              >
-                <Edit3 size={14} />
-              </button>
-            </div>
-          </div>
-
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 flex flex-col items-center justify-center text-emerald-800 shrink-0">
-            <span className="text-[9px] uppercase font-black text-emerald-600">Match</span>
-            <span className="text-xs font-black text-slate-900">{Math.round(overallConfidence * 100)}%</span>
-          </div>
-        </div>
-
-        {/* Inline Dish Name Editing Modal/Dropdown */}
-        {isEditingDish && (
-          <div className="mt-3 p-3 bg-slate-50 border border-emerald-200 rounded-2xl space-y-2 animate-fadeIn">
-            <label className="text-[10px] font-black text-slate-600 uppercase tracking-wider block">
-              Identify / Correct Dish Name:
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={customDishInput}
-                onChange={(e) => setCustomDishInput(e.target.value)}
-                placeholder="e.g. Roti and Bhaji, Paneer Tikka..."
-                className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs w-full text-slate-900 focus:outline-none focus:border-emerald-500 font-semibold"
-              />
-              <button
-                onClick={() => handleApplyCustomDish()}
-                className="bg-emerald-600 text-white px-3 py-2 rounded-xl text-xs font-black hover:bg-emerald-700 transition"
-              >
-                Apply
-              </button>
-            </div>
-
-            {/* Quick Dish Selection Chips */}
-            <div className="pt-1">
-              <span className="text-[9px] font-bold text-slate-400 block mb-1">Quick Select Popular Dishes:</span>
-              <div className="flex flex-wrap gap-1">
-                {quickDishSuggestions.map((dish, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleApplyCustomDish(dish)}
-                    className="text-[9px] font-bold bg-white border border-slate-200 hover:border-emerald-500 hover:text-emerald-700 text-slate-700 px-2 py-1 rounded-lg transition"
-                  >
-                    {dish}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        <p className="text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-3 mt-3">
-          {report.healthSummary}
-        </p>
-      </div>
-
-      {/* Solution 2: Reasonably Estimated Calories & Dynamic Portion Scaler */}
-      <div className="food-card p-4.5 rounded-3xl space-y-3 bg-white border border-slate-200">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-xs font-black text-slate-500 uppercase tracking-wider">Estimated Total Nutrition</h3>
-            <span className="text-[10px] text-slate-400 font-bold">Range: ±30 kcal based on USDA data</span>
-          </div>
-          <span className="text-sm font-black text-emerald-700 flex items-center gap-1 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 shadow-sm">
-            <Flame size={16} className="text-orange-500 fill-orange-500" /> ~{totals.calories} kcal
-          </span>
-        </div>
-
-        {/* Portion Scaler Selector */}
-        <div className="bg-slate-50 p-2 rounded-2xl border border-slate-200 flex items-center justify-between">
-          <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider pl-2">Portion Size:</span>
-          <div className="flex items-center gap-1">
-            {[
-              { label: '0.5x Small', scale: 0.5 },
-              { label: '1.0x Regular', scale: 1.0 },
-              { label: '1.5x Large', scale: 1.5 },
-              { label: '2.0x Double', scale: 2.0 }
-            ].map((p) => (
-              <button
-                key={p.scale}
-                onClick={() => handlePortionSelect(p.scale)}
-                className={`px-2.5 py-1 rounded-xl text-[10px] font-black transition-all ${
-                  activePortionScale === p.scale
-                    ? 'bg-emerald-600 text-white shadow'
-                    : 'bg-white text-slate-700 border border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Macros Breakdown Grid */}
-        <div className="grid grid-cols-4 gap-2 text-center">
-          <div className="bg-slate-50 p-2.5 rounded-2xl border border-emerald-200">
-            <span className="text-[9px] text-slate-500 block font-black uppercase">Protein</span>
-            <span className="text-sm font-black text-emerald-600">{totals.protein}g</span>
-          </div>
-          <div className="bg-slate-50 p-2.5 rounded-2xl border border-teal-200">
-            <span className="text-[9px] text-slate-500 block font-black uppercase">Carbs</span>
-            <span className="text-sm font-black text-teal-600">{totals.carbs}g</span>
-          </div>
-          <div className="bg-slate-50 p-2.5 rounded-2xl border border-cyan-200">
-            <span className="text-[9px] text-slate-500 block font-black uppercase">Fats</span>
-            <span className="text-sm font-black text-cyan-600">{totals.fat}g</span>
-          </div>
-          <div className="bg-slate-50 p-2.5 rounded-2xl border border-indigo-200">
-            <span className="text-[9px] text-slate-500 block font-black uppercase">Fiber</span>
-            <span className="text-sm font-black text-indigo-600">{totals.fiber}g</span>
-          </div>
-        </div>
-
-        {/* Healthy Choice Swaps for High-Calorie / High-Fat Meals */}
-        {(totals.calories > 500 || totals.fat > 22) && (
-          <div className="p-3 bg-emerald-50/80 rounded-2xl border border-emerald-200 space-y-1.5">
-            <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider block">
-              🌟 Recommended Healthier Meal Swap:
-            </span>
-            <div className="flex items-center justify-between">
-              <div>
-                <h5 className="text-xs font-black text-slate-900">Tandoori Paneer Tikka with Whole Wheat Roti</h5>
-                <p className="text-[10px] text-slate-600">Saves ~190 kcal & 18g heavy cream fats</p>
-              </div>
-              <span className="text-xs font-black bg-white text-emerald-800 px-2 py-0.5 rounded-lg border border-emerald-300">
-                ⭐ 4.7
-              </span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Solution 3: Multi-Item Meal Breakdown with Add/Remove */}
-      <div className="food-card p-4.5 rounded-3xl space-y-3 bg-white border border-slate-200">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wider">
-            Detected Meal Components ({report.items?.length || 0})
-          </h3>
-          <button
-            onClick={() => setShowAddItemModal(true)}
-            className="text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-600 hover:text-white px-2.5 py-1 rounded-xl flex items-center gap-1 transition shadow-sm"
-          >
-            <Plus size={12} /> Add Extra Item
-          </button>
-        </div>
-
-        {/* Modal for adding custom extra item */}
-        {showAddItemModal && (
-          <form onSubmit={handleAddNewItemSubmit} className="p-3 bg-slate-50 border border-emerald-200 rounded-2xl space-y-2 animate-fadeIn">
-            <h4 className="text-xs font-black text-slate-800">Add Extra Item to Meal:</h4>
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                type="text"
-                value={newItemName}
-                onChange={(e) => setNewItemName(e.target.value)}
-                placeholder="Item name (e.g. Curd, Salad)"
-                className="bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs text-slate-900"
-                required
-              />
-              <input
-                type="number"
-                value={newItemCalories}
-                onChange={(e) => setNewItemCalories(Number(e.target.value))}
-                placeholder="Est. Calories"
-                className="bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs text-slate-900"
-                required
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setShowAddItemModal(false)}
-                className="text-xs font-bold px-3 py-1 text-slate-500"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="text-xs font-black bg-emerald-600 text-white px-3 py-1 rounded-xl"
-              >
-                Add Item
-              </button>
-            </div>
-          </form>
-        )}
-
-        <div className="space-y-2.5">
-          {report.items?.map((item, idx) => (
-            <div key={idx} className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-2 group hover:border-emerald-300 transition">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-800 text-xs font-black">
-                    {idx + 1}
-                  </div>
-                  <div>
-                    <h5 className="text-xs font-black text-slate-900">{item.name}</h5>
-                    <span className="text-[10px] text-emerald-700 font-bold">Portion: {item.estimatedPortion}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <div className="text-right">
-                    <span className="text-xs font-black text-emerald-700 block">~{item.nutrition?.calories || 0} kcal</span>
-                    <span className="text-[9px] text-slate-400 font-semibold">{Math.round((item.confidence || 0.90) * 100)}% Conf.</span>
-                  </div>
-                  <button
-                    onClick={() => removeMealItem(idx)}
-                    className="w-6 h-6 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white flex items-center justify-center transition"
-                    title="Remove item"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              </div>
-
-              {item.nutrition && (
-                <div className="grid grid-cols-4 gap-1 text-center bg-white p-2 rounded-xl text-[10px] border border-slate-200 font-bold">
-                  <span className="text-emerald-700">P: {item.nutrition.protein}g</span>
-                  <span className="text-teal-700">C: {item.nutrition.carbs}g</span>
-                  <span className="text-cyan-700">F: {item.nutrition.fat}g</span>
-                  <span className="text-indigo-700">Fib: {item.nutrition.fiber}g</span>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Likely Ingredients */}
-      <div className="food-card p-4.5 rounded-3xl space-y-2 bg-white border border-slate-200">
-        <h3 className="text-xs font-black text-slate-500 uppercase tracking-wider">Likely Constituent Ingredients</h3>
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {report.likelyIngredients?.map((ing, idx) => (
-            <span key={idx} className="text-xs bg-slate-100 text-slate-700 border border-slate-200 px-3 py-1 rounded-xl font-semibold">
-              {ing}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {/* Floating Ask Nutritionist AI Chatbot Button */}
-      <button
-        onClick={() => setIsChatOpen(true)}
-        className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-700 to-emerald-700 text-white font-black text-xs shadow-lg shadow-teal-700/20 flex items-center justify-center gap-2 hover:opacity-95 transition"
-      >
-        <Bot size={18} /> 💬 Ask Nutritionist AI Chatbot About This Meal
-      </button>
-
-      {/* Action to Scan Another Item */}
-      <button
-        onClick={() => setScreen('CAMERA')}
-        className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold text-sm shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2 transition active:scale-[0.98]"
-      >
-        <Camera size={20} /> Scan Another Food Item
-      </button>
-
-      {/* AI Nutritionist Chatbot Modal */}
-      <AIChatbotModal
-        isOpen={isChatOpen}
-        onClose={() => setIsChatOpen(false)}
-        contextFood={report}
-      />
-    </div>
-  );
+  return <div className="pb-28 pt-4 px-4 space-y-4 max-w-md mx-auto">
+    {uncertain && <aside className="rounded-2xl bg-amber-50 border border-amber-200 p-4 space-y-2" role="status"><h2 className="flex gap-2 font-bold text-amber-950"><AlertTriangle size={18} /> Please check this identification</h2><p className="text-sm text-amber-900">The image does not support a confident assessment. Check the foods and portions; retake a clearer photo when needed. Missing nutrition is not filled in.</p></aside>}
+    <section className="rounded-3xl border bg-white p-5 space-y-3">
+      <p className="text-xs font-bold text-emerald-700 uppercase">Food photo · estimated analysis</p>
+      <div className="flex items-start justify-between gap-3"><h1 className="text-2xl font-bold text-slate-900">{report.detectedDishName || 'Food identification unavailable'}</h1><button aria-label="Correct dish name" className="p-2 bg-slate-100 rounded-full" onClick={() => setEditing(!editing)}><Edit3 size={18} /></button></div>
+      <p className="text-xs text-slate-500">{report.items.length} identified components. {typeof confidence === 'number' && confidence > 0 ? `Model-reported confidence: ${Math.round(Math.min(confidence, 0.99) * 100)}% (not a measured accuracy guarantee).` : 'Confidence unavailable.'}</p>
+      <p className="text-sm text-slate-600">{report.estimationDisclaimer || 'Visual food and portion estimates can be wrong. Confirm with a food label or measured ingredients when precision matters.'}</p>
+      {report.uncertaintyWarnings?.map(warning => <p key={warning} className="text-xs text-amber-900">{warning}</p>)}
+      {editing && <form className="space-y-2 border-t pt-3" onSubmit={event => { event.preventDefault(); if (!dish.trim()) return; updateMealDishName(dish.trim()); setEditing(false); }}><label className="text-xs font-bold" htmlFor="dish-correction">Correct food name</label><input id="dish-correction" required value={dish} onChange={event => setDish(event.target.value)} placeholder={report.detectedDishName} className="block w-full border rounded-xl p-2" /><p className="text-xs text-slate-500">Changing the identification clears previous nutrients. Reanalyze the photo or enter known nutrients; renaming cannot calculate nutrition.</p><button className="bg-emerald-700 text-white rounded-xl px-4 py-2">Apply correction</button></form>}
+      {!report.items.length && capturedImage && <button className="text-sm text-emerald-700 underline" onClick={() => { setScreen('AI_PROCESSING'); processMealScan(capturedImage, report.detectedDishName); }}>Reanalyze photo with corrected name</button>}
+    </section>
+    <section className="rounded-3xl border bg-white p-5 space-y-3">
+      <h2 className="font-bold text-slate-900">Nutrition for the displayed portion</h2><p className="text-3xl font-bold text-emerald-800">{formatNutrient(totals.calories, 'kcal')}</p>
+      <p className="text-xs text-slate-500">Estimated from the identified food and visible portion, or nutrients you enter. No daily calorie target is assumed.</p>
+      <div className="grid grid-cols-2 gap-2">{NUTRIENT_KEYS.filter(key => key !== 'calories').map(key => <div key={key} className="bg-slate-50 rounded-xl p-3"><p className="text-xs text-slate-500">{labels[key]}</p><strong className="text-sm text-slate-800">{formatNutrient(totals[key], key === 'sodium' ? 'mg' : 'g')}</strong></div>)}</div>
+      <fieldset className="border-t pt-3"><legend className="text-sm font-bold">Adjust visible portion</legend><div className="grid grid-cols-4 gap-2 mt-2">{[0.5, 1, 1.5, 2].map(next => <button key={next} aria-pressed={scale === next} onClick={() => { scaleMealPortion(next / scale); setScale(next); }} className={`p-2 rounded-xl text-sm ${scale === next ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-700'}`}>{next}×</button>)}</div></fieldset>
+      <p className="text-xs text-slate-500">A multiplier of the initial estimate, not a measured serving. Missing values stay unavailable. Edits apply to this report only; they do not rewrite saved history or log consumption.</p>
+    </section>
+    <MacroBreakdown nutrition={totals} /><NutritionRating nutrition={totals} estimated />
+    <section className="rounded-3xl border bg-white p-5 space-y-3">
+      <div className="flex items-center justify-between gap-2"><h2 className="font-bold">Identified foods</h2><button className="text-emerald-700 text-xs font-bold flex gap-1 items-center" onClick={() => setShowAdd(!showAdd)}><Plus size={16} /> Add item</button></div>
+      {showAdd && <form onSubmit={addItem} className="p-3 rounded-2xl bg-slate-50 space-y-3"><p className="text-xs text-slate-600">Enter nutrients only when you know them for this portion. Leave unknowns blank; zero means a known zero.</p><label className="text-xs block">Food name<input required value={name} onChange={e => setName(e.target.value)} className="mt-1 block w-full p-2 border rounded-lg" /></label><label className="text-xs block">Your portion (optional)<input value={portion} onChange={e => setPortion(e.target.value)} placeholder="Measured amount, if known" className="mt-1 block w-full p-2 border rounded-lg" /></label><div className="grid grid-cols-2 gap-2">{NUTRIENT_KEYS.map(key => <label className="text-xs" key={key}>{labels[key]}<input type="number" min="0" step="any" value={values[key] || ''} onChange={e => setValues(previous => ({ ...previous, [key]: e.target.value }))} className="block w-full mt-1 p-2 border rounded-lg" placeholder="Unknown" /></label>)}</div><div className="flex gap-3"><button type="submit" className="bg-emerald-700 text-white px-3 py-2 rounded-lg text-sm">Add known data</button><button type="button" onClick={() => setShowAdd(false)} className="text-sm">Cancel</button></div></form>}
+      {report.items.map((item, index) => <article key={index} className="rounded-2xl bg-slate-50 border p-3 space-y-2"><div className="flex justify-between gap-2"><h3 className="font-bold text-sm">{item.name}</h3><button aria-label={`Remove ${item.name}`} className="text-rose-700 p-1" onClick={() => removeMealItem(index)}><Trash2 size={16} /></button></div><p className="text-xs text-slate-600">{item.isEstimated ? 'Estimated portion' : 'Entered portion'}: {item.estimatedPortion || 'Unavailable'}{item.portionMultiplier && item.portionMultiplier !== 1 ? ` × ${item.portionMultiplier}` : ''}</p><p className="font-bold text-emerald-800">{formatNutrient(item.nutrition?.calories, 'kcal')}</p><div className="grid grid-cols-2 gap-1 text-xs text-slate-600"><p>Protein: {formatNutrient(item.nutrition?.protein)}</p><p>Carbs: {formatNutrient(item.nutrition?.carbs)}</p><p>Fat: {formatNutrient(item.nutrition?.fat)}</p><p>Fiber: {formatNutrient(item.nutrition?.fiber)}</p></div><p className="text-xs text-slate-500">Source: {item.dataSource || 'Unspecified'}</p></article>)}
+      {!report.items.length && <p className="text-sm text-slate-500">No identified components. Add known information or take another photo.</p>}
+    </section>
+    {report.likelyIngredients.length > 0 && <section className="rounded-3xl border bg-white p-5 space-y-2"><h2 className="font-bold">Visible / declared ingredients</h2><p className="text-sm text-slate-600">{report.likelyIngredients.join(', ')}</p><p className="text-xs text-slate-500">Not a complete recipe or allergen check. Hidden ingredients cannot be verified from a photo.</p></section>}
+    {ideas.length > 0 && <section className="rounded-3xl border bg-white p-5 space-y-3"><h2 className="font-bold">Ideas for your next meal</h2>{ideas.map(idea => <div key={idea.title}><h3 className="text-sm font-bold text-emerald-800">{idea.title}</h3><p className="text-xs text-slate-600 mt-1">{idea.text}</p></div>)}<p className="text-xs text-slate-500">Qualitative ideas, not nutrient-verified alternatives. Check allergies and preferences. No calorie savings or nutrient amounts are assumed.</p></section>}
+    <button onClick={() => setChat(true)} className="w-full p-3 rounded-2xl bg-teal-800 text-white flex items-center justify-center gap-2"><Bot size={18} /> Ask the food assistant</button><button onClick={() => setScreen('CAMERA')} className="w-full p-4 rounded-2xl bg-emerald-700 text-white font-bold flex items-center justify-center gap-2"><Camera size={18} /> Scan another food</button><AIChatbotModal isOpen={chat} onClose={() => setChat(false)} contextFood={report} />
+  </div>;
 };

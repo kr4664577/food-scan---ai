@@ -3,8 +3,11 @@ import { useAppStore } from '../store/useAppStore';
 import { Heart, Trash2, ArrowRight } from 'lucide-react';
 
 export const FavoritesScreen: React.FC = () => {
-  const { history, toggleFavorite, setScreen } = useAppStore();
-  const favoriteItems = history.filter(item => item.isFavorite);
+  const { history, historyStatus, token, user, fetchHistory, toggleFavorite, setScreen } = useAppStore();
+  const authenticated = Boolean(token && user?.id && user.id !== 'guest');
+  React.useEffect(() => { void fetchHistory(); }, [token, user?.id, fetchHistory]);
+  const favoriteItems = authenticated ? history.filter(item => item.userId === user?.id && item.isFavorite) : [];
+  const loading = historyStatus === 'idle' || historyStatus === 'loading';
 
   return (
     <div className="pb-28 pt-4 px-4 space-y-4 max-w-md mx-auto">
@@ -14,11 +17,21 @@ export const FavoritesScreen: React.FC = () => {
           <p className="text-xs text-slate-500">Your bookmarked healthy meals and products</p>
         </div>
         <span className="text-xs text-emerald-700 font-extrabold bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
-          {favoriteItems.length} Bookmarks
+          {authenticated && historyStatus !== 'ready' ? '—' : favoriteItems.length} Bookmarks
         </span>
       </div>
 
-      {favoriteItems.length === 0 ? (
+      {!authenticated ? (
+        <div className="food-card p-8 rounded-3xl text-center space-y-3">
+          <h3 className="text-base font-extrabold text-slate-900">Save your favorite foods</h3>
+          <p className="text-xs text-slate-500">Sign in to view and save your own food scans.</p>
+          <button className="text-sm font-bold text-emerald-700 underline" onClick={() => setScreen('AUTH')}>Sign in</button>
+        </div>
+      ) : loading ? (
+        <p role="status" className="text-sm text-slate-600">Loading your saved foods…</p>
+      ) : historyStatus === 'error' ? (
+        <button className="text-sm text-rose-700 underline" onClick={() => void fetchHistory()}>Saved foods could not be loaded. Retry</button>
+      ) : favoriteItems.length === 0 ? (
         <div className="food-card p-8 rounded-3xl text-center text-slate-500 space-y-3">
           <div className="w-16 h-16 rounded-full bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-500 mx-auto shadow-sm">
             <Heart size={32} />
@@ -54,7 +67,7 @@ export const FavoritesScreen: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-2">
-                {item.calories && (
+                {typeof item.calories === 'number' && Number.isFinite(item.calories) && (
                   <span className="text-xs font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200">
                     {item.calories} kcal
                   </span>

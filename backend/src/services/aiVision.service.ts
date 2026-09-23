@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { GoogleGenAI } from '@google/genai';
 import { timeScan } from '../middlewares/scanTiming';
+import { retryAfterSeconds } from './providerRetry';
 
 const getGrokApiKey = () => process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
 const getGeminiApiKey = () => process.env.GEMINI_API_KEY || '';
@@ -10,7 +11,19 @@ const visionClient = (apiKey: string) => {
   if (!client || clientKey !== apiKey) {
     clientKey = apiKey;
     // This service owns retries. SDK defaults must not multiply our attempts.
-    client = new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'aistudio-build' }, retryOptions: { attempts: 1 } } });
+    client = new GoogleGenAI({ apiKey, httpOptions: {
+      headers: { 'User-Agent': 'aistudio-build' }, retryOptions: { attempts: 1 },
+      fetch: async (input, init) => {
+        const response = await globalThis.fetch(input, init);
+        // SDK ApiError does not retain response headers. Preserve only cooldown
+        // metadata on retryable failures, without retaining the request/key.
+        if ([429, 503].includes(response.status) && retryAfterSeconds({ headers: response.headers })) {
+          await response.body?.cancel();
+          throw Object.assign(new Error('Provider requested a cooldown.'), { status: response.status, headers: { 'retry-after': response.headers.get('retry-after') } });
+        }
+        return response;
+      }
+    } });
   }
   return client;
 };
@@ -126,7 +139,6 @@ export const runUnifiedVisionAnalysis = async (params: {
             }
           }
         } catch (geminiErr: any) {
-          const errMsg = geminiErr?.message || String(geminiErr);
           const errStatus = geminiErr?.status || geminiErr?.code || 'ERROR';
           const detailedMsg = `[${modelName} / ${Number(errStatus) || 'ERROR'}]`;
           geminiErrors.push(detailedMsg);
@@ -134,11 +146,16 @@ export const runUnifiedVisionAnalysis = async (params: {
           // Authentication/quota failures are not cured by rapid duplicate calls.
           if ([401, 403, 429].includes(Number(errStatus))) {
             const error = new Error(Number(errStatus) === 429 ? 'AI service is busy or its quota is exhausted. Please try again later.' : 'AI service is unavailable. Please try again later.');
-            Object.assign(error, { statusCode: Number(errStatus) === 429 ? 429 : 503, publicMessage: error.message });
+            Object.assign(error, { statusCode: Number(errStatus) === 429 ? 429 : 503, publicMessage: error.message, retryAfterSeconds: retryAfterSeconds(geminiErr) });
             throw error;
           }
 
-          // Retry on 503 high demand or 429 quota once after brief pause
+          // Never wait/retry automatically when the provider asks for a cooldown.
+          const retryAfter = retryAfterSeconds(geminiErr);
+          if (retryAfter) {
+            throw Object.assign(new Error('AI service is temporarily busy. Please try again later.'), { statusCode: 503, publicMessage: 'AI service is temporarily busy. Please try again later.', retryAfterSeconds: retryAfter });
+          }
+          // Retry a transient failure once across the entire fallback chain.
           if ((Number(errStatus) === 503 || Number(errStatus) === 500) && attempts < 2 && transientRetries < 1) {
             transientRetries++;
             await new Promise((r) => setTimeout(r, 1200));

@@ -87,6 +87,7 @@ export const scanPackagedImage = async (req: AuthenticatedRequest, res: Response
           data: {
             userId,
             scanType: 'PACKAGED',
+            qualityAnalysis: JSON.stringify({ foodClassification: analysis.foodClassification, nutritionBasis: analysis.nutritionBasis, servingSize: analysis.servingSize, nutrition: analysis.nutrition }),
             productName: analysis.productName,
             brandName: analysis.brandName,
             calories: analysis.nutrition.calories,
@@ -104,7 +105,7 @@ export const scanPackagedImage = async (req: AuthenticatedRequest, res: Response
           }
         }));
       } catch (dbErr: any) {
-        console.warn('[Scan Controller] Non-fatal DB save error for packaged scan:', dbErr?.message);
+        console.warn('[Scan Controller] Could not save packaged scan.');
       }
     }
 
@@ -156,11 +157,11 @@ export const scanMealImage = async (req: AuthenticatedRequest, res: Response, ne
             fats: mealAnalysis.totalNutrition.fat,
             ingredients: JSON.stringify(mealAnalysis.likelyIngredients),
             confidenceScore: mealAnalysis.confidence.overall,
-            qualityAnalysis: JSON.stringify({ items: mealAnalysis.items, summary: mealAnalysis.healthSummary })
+            qualityAnalysis: JSON.stringify({ foodClassification: 'food', nutritionBasis: 'estimated_visible_portion', totalNutrition: mealAnalysis.totalNutrition, items: mealAnalysis.items, summary: mealAnalysis.healthSummary, confidence: mealAnalysis.confidence })
           }
         }));
       } catch (dbErr: any) {
-        console.warn('[Scan Controller] Non-fatal DB save error for meal scan:', dbErr?.message);
+        console.warn('[Scan Controller] Could not save meal scan.');
       }
     }
 
@@ -219,7 +220,7 @@ export const scanVisualQuality = async (req: AuthenticatedRequest, res: Response
           }
         }));
       } catch (dbErr: any) {
-        console.warn('[Scan Controller] Non-fatal DB save error for quality scan:', dbErr?.message);
+        console.warn('[Scan Controller] Could not save quality scan.');
       }
     }
 

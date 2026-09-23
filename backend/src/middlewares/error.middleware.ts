@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from 'express';
 export interface AppError extends Error {
   statusCode?: number;
   publicMessage?: string;
+  retryAfterSeconds?: number;
 }
 
 export const errorHandler = (
@@ -22,12 +23,15 @@ export const errorHandler = (
 
   // Safe backend logging without leaking sensitive payloads
   console.error(`[API Error] Status ${statusCode}`);
+  const retryAfter = typeof err.retryAfterSeconds === 'number' && Number.isFinite(err.retryAfterSeconds) && err.retryAfterSeconds > 0 ? Math.ceil(err.retryAfterSeconds) : undefined;
+  if (retryAfter) res.setHeader('Retry-After', String(retryAfter));
 
   res.status(statusCode).json({
     success: false,
     error: {
       message,
-      statusCode
+      statusCode,
+      ...(retryAfter ? { retryAfterSeconds: retryAfter } : {})
     }
   });
 };

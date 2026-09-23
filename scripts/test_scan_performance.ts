@@ -3,6 +3,12 @@ import express from 'express';
 import { scanTiming, bodyParsed, timeScan } from '../backend/src/middlewares/scanTiming';
 import { fitImage, imageOptions } from '../src/utils/imageUtils';
 import { beginCapture, imageReady, beginScanRequest, scanUploaded, scanResponse, scanRendered, scanTimings, scanPhase } from '../src/utils/scanPerformance';
+import { retryAfterSeconds } from '../backend/src/services/providerRetry';
+
+assert.equal(retryAfterSeconds({ headers: { 'retry-after': '30' } }), 30);
+assert.equal(retryAfterSeconds({ headers: { 'retry-after': new Date(90000).toUTCString() } }, 60000), 30);
+assert.equal(retryAfterSeconds({ message: JSON.stringify({ error: { details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '2.5s' }] } }) }), 3);
+assert.equal(retryAfterSeconds({ headers: { 'retry-after': 'unsafe' } }), undefined);
 
 assert.deepEqual(fitImage(4032, 3024, 1280), { width: 1280, height: 960 });
 assert.deepEqual(fitImage(600, 400, 1280), { width: 600, height: 400 });
@@ -18,6 +24,16 @@ assert.deepEqual(scanTimings().serverMs, { gemini: 10.5, total: 12.5 });
 assert.ok(scanTimings().submitToPaintMs! >= 0);
 
 const app = express();
+app.use((req, res, next) => {
+  if (req.headers['x-serverless-test']) {
+    res.json = function (body) {
+      this.setHeader('Content-Type', 'application/json');
+      this.end(JSON.stringify(body));
+      return this;
+    };
+  }
+  next();
+});
 app.use(scanTiming, express.json(), bodyParsed);
 app.post('/api/scan/meal', async (req, res) => {
   for (let i = 0; i < req.body.attempts; i++) await timeScan('gemini', async () => null);
@@ -35,6 +51,10 @@ try {
     for (const name of ['body', 'gemini', 'database', 'serialize', 'total']) assert.match(timings, new RegExp(`${name};dur=\\d`));
     assert.deepEqual(await r.json(), { success: true }, 'Instrumentation must not change the response');
   }
+  const adapted = await fetch(`http://127.0.0.1:${port}/api/scan/meal`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-serverless-test': '1' }, body: JSON.stringify({ attempts: 1 }) });
+  assert.match(adapted.headers.get('server-timing')!, /gemini;dur=/);
+  assert.equal(adapted.headers.get('x-scan-ai-attempts'), '1');
+  assert.deepEqual(await adapted.json(), { success: true });
 } finally { server.close(); }
 
 // Offline SDK transport: exercises retry policy without sending images/credentials anywhere.
@@ -43,10 +63,11 @@ process.env.GEMINI_API_KEY = 'offline-test-only';
 delete process.env.GROK_API_KEY; delete process.env.XAI_API_KEY;
 let calls = 0;
 let failures: number[] = [];
+let retryHeader: string | undefined;
 globalThis.fetch = (async () => {
   calls++;
   const status = failures.shift();
-  return new Response(JSON.stringify(status ? { error: { code: status, status: 'UNAVAILABLE', message: 'offline failure' } } : { candidates: [{ content: { parts: [{ text: '{"verifiedFixture":true}' }] } }] }), { status: status || 200, headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(status ? { error: { code: status, status: 'UNAVAILABLE', message: 'offline failure' } } : { candidates: [{ content: { parts: [{ text: '{"verifiedFixture":true}' }] } }] }), { status: status || 200, headers: { 'Content-Type': 'application/json', ...(retryHeader ? { 'Retry-After': retryHeader } : {}) } });
 }) as typeof fetch;
 try {
   const { runUnifiedVisionAnalysis } = await import('../backend/src/services/aiVision.service');
@@ -59,6 +80,10 @@ try {
   calls = 0; failures = [429];
   await assert.rejects(runUnifiedVisionAnalysis(params), /quota/);
   assert.equal(calls, 1, 'Do not repeatedly spend quota on a rejected request');
+  calls = 0; failures = [429]; retryHeader = '20';
+  await assert.rejects(runUnifiedVisionAnalysis(params), (error: any) => error.statusCode === 429 && error.retryAfterSeconds === 20);
+  assert.equal(calls, 1, 'Retry-After must be forwarded without a retry');
+  retryHeader = undefined;
   calls = 0; failures = [404, 404, 404, 404];
   await assert.rejects(runUnifiedVisionAnalysis(params), /analysis failed/);
   assert.equal(calls, 4, 'Try each existing model once without hidden SDK retries');

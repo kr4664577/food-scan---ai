@@ -75,6 +75,8 @@ Reproduce:
 
 ## Persistence and remaining work
 
+Post-deployment verification: Vercel reported successful deployment of e84bd5d. Production food and beverage barcode requests returned 200 with food classification; the unknown barcode returned 404 without nutrition. A public banana-image request returned HTTP 429 after 25,244 ms, so no successful post-update photo latency can be claimed. No further live Gemini requests were made. This exposed a serverless response-adapter timing-header gap; instrumentation now wraps the shared end() path, with an adapter regression test, without replacing serialization.
+
 The backend still uses ResilientDatabase's in-memory/file-backed JSON engine. DATABASE_URL being configured does NOT mean Neon is being used. The previously inspected Neon public schema had no tables. No schema, data file, credentials, JWT mechanism, secrets or environment values were changed. No production migration or data deletion was performed.
 
 This is an unresolved durability risk on Vercel, including for goals/history/averages after cold starts. A current recoverable account/history snapshot and a reconciled migration plan remain necessary. Existing runtime-only records cannot be claimed recoverable from the repository snapshot.

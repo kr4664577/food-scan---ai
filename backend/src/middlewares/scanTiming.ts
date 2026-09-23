@@ -25,8 +25,10 @@ export const scanTiming: RequestHandler = (req, res, next) => {
     let serializeStarted: number | undefined;
     const json = res.json;
     res.json = function (body) { serializeStarted = performance.now(); return json.call(this, body); };
-    const send = res.send;
-    res.send = function (body) {
+    // Serverless adapters may implement json() without Express's send().
+    // end() is shared by both paths; preserve the adapter's serialization.
+    const end = res.end;
+    res.end = function (this: typeof res, ...args: any[]) {
       if (!res.headersSent) {
         if (serializeStarted !== undefined) trace.durations.serialize = performance.now() - serializeStarted;
         const total = performance.now() - trace.started;
@@ -37,8 +39,8 @@ export const scanTiming: RequestHandler = (req, res, next) => {
           console.info('[scan-perf]', JSON.stringify({ status: res.statusCode, ms: trace.durations, totalMs: Math.round(total), aiAttempts: trace.attempts }));
         }
       }
-      return send.call(this, body);
-    };
+      return (end as any).apply(this, args);
+    } as typeof res.end;
     next();
   });
 };

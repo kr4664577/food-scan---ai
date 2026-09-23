@@ -87,3 +87,18 @@ await lateScan;
 assert.equal(store.getState().activeMealReport, null);
 assert.equal(store.getState().currentScreen, 'AUTH');
 console.log('History reload and late scan/history ownership guards passed.');
+
+store.getState().setUser(profile, 'favorite-session');
+store.setState({ history: [{ ...ownScan, scanType: 'MEAL', isFavorite: false }] });
+apiClient.post = (async () => response({ success: true, isFavorite: true })) as any;
+await store.getState().toggleFavorite(ownScan.id);
+await store.getState().toggleFavorite(ownScan.id);
+assert.equal(store.getState().history[0].isFavorite, true, 'Use authoritative favorite state instead of blindly toggling');
+let finishFavorite: (value: any) => void;
+apiClient.post = (() => new Promise(resolve => { finishFavorite = resolve; })) as any;
+const pendingFavorite = store.getState().toggleFavorite(ownScan.id);
+store.getState().logout();
+finishFavorite!(response({ success: true, isFavorite: true }));
+await pendingFavorite;
+assert.deepEqual(store.getState().history, []);
+console.log('Favorite authoritative-state and logout race regressions passed.');

@@ -50,7 +50,7 @@ app.use(
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-    exposedHeaders: ['Server-Timing', 'X-Scan-AI-Attempts']
+    exposedHeaders: ['Server-Timing', 'X-Scan-AI-Attempts', 'Retry-After']
   })
 );
 

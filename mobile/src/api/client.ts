@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { beginScanRequest, scanUploaded, scanResponse } from '../utils/scanPerformance';
+let scanRetryAt = 0;
 
 export function apiErrorMessage(error: unknown, fallback: string): string {
   if (typeof error === 'string' && error) return error;
@@ -111,6 +112,8 @@ export const apiClient = axios.create({
 // Request logging interceptor
 apiClient.interceptors.request.use((config) => {
   if (config.method === 'post' && config.url?.startsWith('/scan/')) {
+    const seconds = Math.ceil((scanRetryAt - Date.now()) / 1000);
+    if (seconds > 0) throw Object.assign(new Error('Scan cooldown active.'), { config, response: { status: 429, headers: {}, data: { error: { message: `Please wait ${seconds} seconds before trying another scan.`, retryAfterSeconds: seconds } } } });
     beginScanRequest();
     config.onUploadProgress = (event) => { if (event.total && event.loaded >= event.total) scanUploaded(); };
   }
@@ -132,6 +135,12 @@ apiClient.interceptors.response.use(
     return response;
   },
   (error) => {
+    if (error.config?.url?.startsWith('/scan/') && [429, 503].includes(error.response?.status)) {
+      const header = error.response?.headers?.['retry-after'];
+      const numeric = Number(header ?? error.response?.data?.error?.retryAfterSeconds);
+      const seconds = Number.isFinite(numeric) ? numeric : typeof header === 'string' ? (Date.parse(header) - Date.now()) / 1000 : 0;
+      if (seconds > 0 && seconds <= 604800) scanRetryAt = Math.max(scanRetryAt, Date.now() + seconds * 1000);
+    }
     if (error.config?.url?.startsWith('/scan/')) scanResponse(error.response?.headers?.['server-timing'], false);
     const base = (error.config?.baseURL || '').replace(/\/+$/, '');
     const path = (error.config?.url || '').replace(/^\/+/, '');

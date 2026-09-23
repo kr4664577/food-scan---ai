@@ -7,9 +7,11 @@ import {
   PackagedFoodAnalysis,
   MealFoodAnalysis,
   QualityAnalysis,
-  ScanItem
+  ScanItem,
+  MealNutrition
 } from '../types';
 import { apiClient, setAuthToken, apiErrorMessage } from '../api/client';
+import { emptyMealNutrition, sumMealNutrition, scaleMealNutrition } from '../utils/mealNutrition';
 interface AppState {
   currentScreen: ScreenType;
   previousScreen: ScreenType | null;
@@ -56,7 +58,7 @@ interface AppState {
   // Interactive Meal Editing Actions
   updateMealDishName: (dishName: string) => void;
   scaleMealPortion: (multiplier: number) => void;
-  addMealItem: (name: string, portion: string, calories: number, protein: number, carbs: number, fat: number) => void;
+  addMealItem: (name: string, portion: string | null, nutrition: MealNutrition) => void;
   removeMealItem: (index: number) => void;
 }
 
@@ -68,7 +70,7 @@ let initialUser: UserProfile | null = null;
 if (typeof window !== 'undefined') {
   try {
     const raw = localStorage.getItem('foodscan_user');
-    if (raw) initialUser = JSON.parse(raw);
+    if (raw && initialToken) initialUser = JSON.parse(raw);
   } catch {}
 }
 if (initialToken) {
@@ -309,15 +311,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   toggleFavorite: async (scanId: string) => {
+    const token = get().token, userId = get().user?.id;
+    if (!token || !userId) return;
     try {
-      await apiClient.post('/history/favorites/toggle', { scanId });
+      const response = await apiClient.post('/history/favorites/toggle', { scanId });
+      if (get().token !== token || get().user?.id !== userId || response.data?.success !== true || typeof response.data?.isFavorite !== 'boolean') return;
       set((state) => ({
         history: state.history.map(item =>
-          item.id === scanId ? { ...item, isFavorite: !item.isFavorite } : item
+          item.id === scanId && item.userId === userId ? { ...item, isFavorite: response.data.isFavorite } : item
         )
       }));
     } catch (err) {
-      console.warn('Toggle favorite error:', err);
+      console.warn('Unable to update favorite.');
     }
   },
 
@@ -339,37 +344,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateMealDishName: (dishName: string) => {
     const state = get();
     if (!state.activeMealReport) return;
-    set({ activeMealReport: { ...state.activeMealReport, detectedDishName: dishName } });
+    if (!dishName.trim() || dishName.trim() === state.activeMealReport.detectedDishName) return;
+    // Renaming an identification cannot validate the old food's nutrients.
+    set({ activeMealReport: { ...state.activeMealReport, detectedDishName: dishName.trim(), items: [], totalNutrition: emptyMealNutrition(), confidence: { itemsRecognition: 0, portionVolume: 0, totalNutrition: 0, overall: 0 }, likelyIngredients: [], healthSummary: 'Food name corrected. Scan again with this name to estimate nutrition.', uncertaintyWarnings: ['Nutrition is unavailable after a food correction until the image is analyzed again.'] } });
   },
 
   scaleMealPortion: (multiplier: number) => {
     const state = get();
-    if (!state.activeMealReport) return;
+    if (!state.activeMealReport || !Number.isFinite(multiplier) || multiplier <= 0 || multiplier > 10) return;
     const report = state.activeMealReport;
 
     const scaledItems = (report.items || []).map(item => ({
       ...item,
-      nutrition: {
-        ...item.nutrition,
-        calories: Math.round(item.nutrition.calories * multiplier),
-        protein: Math.round(item.nutrition.protein * multiplier * 10) / 10,
-        carbs: Math.round(item.nutrition.carbs * multiplier * 10) / 10,
-        fat: Math.round(item.nutrition.fat * multiplier * 10) / 10,
-        fiber: Math.round(item.nutrition.fiber * multiplier * 10) / 10,
-        sugar: Math.round((item.nutrition.sugar || 0) * multiplier * 10) / 10,
-        sodium: Math.round((item.nutrition.sodium || 0) * multiplier)
-      }
+      portionMultiplier: (item.portionMultiplier || 1) * multiplier,
+      nutrition: scaleMealNutrition(item.nutrition, multiplier)
     }));
 
-    const totalNutrition = scaledItems.reduce((acc, item) => ({
-      calories: acc.calories + item.nutrition.calories,
-      protein: Math.round((acc.protein + item.nutrition.protein) * 10) / 10,
-      carbs: Math.round((acc.carbs + item.nutrition.carbs) * 10) / 10,
-      fat: Math.round((acc.fat + item.nutrition.fat) * 10) / 10,
-      fiber: Math.round((acc.fiber + item.nutrition.fiber) * 10) / 10,
-      sugar: Math.round((acc.sugar + (item.nutrition.sugar || 0)) * 10) / 10,
-      sodium: Math.round(acc.sodium + (item.nutrition.sodium || 0))
-    }), { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0, sodium: 0 });
+    const totalNutrition = sumMealNutrition(scaledItems);
 
     set({
       activeMealReport: {
@@ -380,30 +371,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  addMealItem: (name: string, portion: string, calories: number, protein: number, carbs: number, fat: number) => {
+  addMealItem: (name: string, portion: string | null, nutrition: MealNutrition) => {
     const state = get();
-    if (!state.activeMealReport) return;
+    if (!state.activeMealReport || !name.trim()) return;
     const report = state.activeMealReport;
 
     const newItem = {
       name,
       estimatedPortion: portion,
-      confidence: 0.95,
+      confidence: 0,
       isEstimated: true,
       dataSource: "User Meal Custom Addition",
-      nutrition: { calories, protein, carbs, fat, fiber: 2, sugar: 1, sodium: 150 }
+      nutrition: scaleMealNutrition({ ...emptyMealNutrition(), ...nutrition }, 1)
     };
 
     const updatedItems = [...(report.items || []), newItem];
-    const totalNutrition = updatedItems.reduce((acc, item) => ({
-      calories: acc.calories + item.nutrition.calories,
-      protein: Math.round((acc.protein + item.nutrition.protein) * 10) / 10,
-      carbs: Math.round((acc.carbs + item.nutrition.carbs) * 10) / 10,
-      fat: Math.round((acc.fat + item.nutrition.fat) * 10) / 10,
-      fiber: Math.round((acc.fiber + item.nutrition.fiber) * 10) / 10,
-      sugar: Math.round((acc.sugar + (item.nutrition.sugar || 0)) * 10) / 10,
-      sodium: Math.round(acc.sodium + (item.nutrition.sodium || 0))
-    }), { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0, sodium: 0 });
+    const totalNutrition = sumMealNutrition(updatedItems);
 
     set({
       activeMealReport: {
@@ -420,15 +403,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const report = state.activeMealReport;
 
     const updatedItems = (report.items || []).filter((_, i) => i !== index);
-    const totalNutrition = updatedItems.reduce((acc, item) => ({
-      calories: acc.calories + item.nutrition.calories,
-      protein: Math.round((acc.protein + item.nutrition.protein) * 10) / 10,
-      carbs: Math.round((acc.carbs + item.nutrition.carbs) * 10) / 10,
-      fat: Math.round((acc.fat + item.nutrition.fat) * 10) / 10,
-      fiber: Math.round((acc.fiber + item.nutrition.fiber) * 10) / 10,
-      sugar: Math.round((acc.sugar + (item.nutrition.sugar || 0)) * 10) / 10,
-      sodium: Math.round(acc.sodium + (item.nutrition.sodium || 0))
-    }), { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0, sodium: 0 });
+    const totalNutrition = sumMealNutrition(updatedItems);
 
     set({
       activeMealReport: {

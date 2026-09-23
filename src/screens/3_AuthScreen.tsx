@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import { apiClient } from '../api/client';
+import { apiClient, apiErrorMessage } from '../api/client';
 import { Mail, Lock, User, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
 
 export const AuthScreen: React.FC = () => {
@@ -14,6 +14,7 @@ export const AuthScreen: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setErrorMsg(null);
     setIsSubmitting(true);
 
@@ -51,8 +52,9 @@ export const AuthScreen: React.FC = () => {
         }
       }
     } catch (err: any) {
-      console.error('[Auth Error]', err);
-      const serverMsg = err.response?.data?.error?.message || err.response?.data?.error;
+      // Axios errors contain the request body and headers; never log auth payloads.
+      console.warn('[Auth Error]', { httpStatus: err.response?.status });
+      const serverMsg = apiErrorMessage(err.response?.data?.error, '');
       if (serverMsg) {
         setErrorMsg(serverMsg);
       } else if (err.message?.includes('Network Error') || !err.response) {
@@ -95,6 +97,7 @@ export const AuthScreen: React.FC = () => {
         <div className="flex bg-slate-900 p-1 rounded-2xl mb-6 border border-slate-800">
           <button
             type="button"
+            disabled={isSubmitting}
             onClick={() => {
               setIsLogin(true);
               setErrorMsg(null);
@@ -107,6 +110,7 @@ export const AuthScreen: React.FC = () => {
           </button>
           <button
             type="button"
+            disabled={isSubmitting}
             onClick={() => {
               setIsLogin(false);
               setErrorMsg(null);
@@ -202,6 +206,7 @@ export const AuthScreen: React.FC = () => {
       <div className="pt-6 border-t border-slate-900 space-y-2.5">
         <button
           type="button"
+          disabled={isSubmitting}
           onClick={handleContinueAsGuest}
           className="w-full py-3 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-800 hover:text-white transition text-center flex items-center justify-center gap-2"
         >

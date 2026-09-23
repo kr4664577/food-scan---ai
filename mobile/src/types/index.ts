@@ -114,36 +114,34 @@ export interface PackagedFoodAnalysis {
   isValidated?: boolean;
 }
 
+export interface MealNutrition {
+  calories: number | null;
+  protein: number | null;
+  carbs: number | null;
+  fat: number | null;
+  fiber: number | null;
+  sugar: number | null;
+  sodium: number | null;
+  saturatedFat?: number | null;
+}
+
 export interface IdentifiedFoodItem {
   name: string;
-  estimatedPortion: string;
+  estimatedPortion: string | null;
+  portionMultiplier?: number;
   confidence: number;
   isEstimated: boolean;
   dataSource: string;
-  nutrition: {
-    calories: number;
-    protein: number;
-    carbs: number;
-    fat: number;
-    fiber: number;
-    sugar: number;
-    sodium: number;
-  };
+  nutrition: MealNutrition;
 }
 
 export interface MealFoodAnalysis {
+  foodClassification?: 'food';
+  uncertaintyWarnings?: string[];
   detectedDishName: string;
   items: IdentifiedFoodItem[];
   
-  totalNutrition: {
-    calories: number;
-    protein: number;
-    carbs: number;
-    fat: number;
-    fiber: number;
-    sugar: number;
-    sodium: number;
-  };
+  totalNutrition: MealNutrition;
   
   confidence: {
     itemsRecognition: number;
@@ -204,7 +202,10 @@ export interface ScanItem {
   scanType: 'PACKAGED' | 'MEAL' | 'QUALITY_INSPECTION';
   productName: string;
   brandName?: string;
-  calories?: number;
+  calories?: number | null;
+  proteins?: number | null;
+  carbs?: number | null;
+  fats?: number | null;
   createdAt: string;
   isFavorite?: boolean;
   scanData?: PackagedFoodAnalysis | MealFoodAnalysis | QualityAnalysis;
