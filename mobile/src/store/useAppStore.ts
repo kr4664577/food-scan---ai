@@ -10,8 +10,10 @@ import {
   ScanItem,
   MealNutrition
 } from '../types';
-import { apiClient, setAuthToken, apiErrorMessage } from '../api/client';
+import { apiClient, setAuthToken } from '../api/client';
 import { emptyMealNutrition, sumMealNutrition, scaleMealNutrition } from '../utils/mealNutrition';
+import { getFriendlyScanErrorMessage } from '../utils/scanErrors';
+import { beginScanRequest, cancelScanTrace, scanResponse } from '../utils/scanPerformance';
 interface AppState {
   currentScreen: ScreenType;
   previousScreen: ScreenType | null;
@@ -33,6 +35,8 @@ interface AppState {
   favorites: ScanItem[];
   isLoading: boolean;
   errorMessage: string | null;
+  activeScanRequestId: string | null;
+  cancelScan: () => void;
 
   // Actions
   setScreen: (screen: ScreenType) => void;
@@ -77,6 +81,57 @@ if (initialToken) {
   setAuthToken(initialToken);
 }
 
+const clearedReports = { activeMealReport: null, activePackagedReport: null, activeQualityReport: null };
+let requestSequence = 0;
+let activeScan: { id: string; controller: AbortController } | null = null;
+function cancelCurrentScan() {
+  const pending = activeScan;
+  activeScan = null;
+  pending?.controller.abort();
+  if (pending) {
+    cancelScanTrace(pending.id);
+    useAppStore.setState({ activeScanRequestId: null, isLoading: false, ...clearedReports });
+  }
+}
+function validAnalysis(value: any, screen: ScreenType, barcode: boolean) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (screen === 'QUALITY_REPORT') return ['No obvious visible issue detected', 'Possible visible issue detected', 'Unable to determine'].includes(value.statusCategory) && Array.isArray(value.detectedIssues);
+  const name = screen === 'MEAL_REPORT' ? value.detectedDishName : value.productName;
+  const nutrition = screen === 'MEAL_REPORT' ? value.totalNutrition : value.nutrition;
+  if (typeof name !== 'string' || !name.trim() || !nutrition || typeof nutrition !== 'object' || Array.isArray(nutrition)) return false;
+  if (screen === 'MEAL_REPORT' && (value.foodClassification !== 'food' || !Array.isArray(value.items) || !value.items.length)) return false;
+  if (barcode && value.foodClassification !== 'food') return false;
+  return Object.values(nutrition).every(n => n === null || (typeof n === 'number' && Number.isFinite(n) && n >= 0));
+}
+async function runScan(endpoint: string, payload: Record<string, unknown>, screen: ScreenType): Promise<boolean> {
+  const state = useAppStore.getState();
+  if (state.isLoading || state.activeScanRequestId) return false;
+  const id = `scan-${Date.now()}-${++requestSequence}`, controller = new AbortController();
+  const token = state.token, userId = state.user?.id;
+  activeScan = { id, controller };
+  const current = () => !controller.signal.aborted && activeScan?.id === id && useAppStore.getState().activeScanRequestId === id && useAppStore.getState().token === token && useAppStore.getState().user?.id === userId;
+  useAppStore.setState({ activeScanRequestId: id, isLoading: true, errorMessage: null, ...clearedReports });
+  beginScanRequest(id);
+  try {
+    const response = await apiClient.post(endpoint, payload, { signal: controller.signal, scanRequestId: id });
+    if (!current()) return false;
+    if (response.data?.success !== true) throw { response };
+    const result = screen === 'MEAL_REPORT' ? response.data?.data?.mealAnalysis || response.data?.data?.analysis : screen === 'QUALITY_REPORT' ? response.data?.data?.qualityResult : response.data?.data?.analysis;
+    if (!validAnalysis(result, screen, endpoint === '/scan/barcode')) throw { response: { status: 502, data: { error: { code: 'AI_INVALID_RESPONSE' } } } };
+    useAppStore.setState({ ...(screen === 'MEAL_REPORT' ? { activeMealReport: result } : screen === 'QUALITY_REPORT' ? { activeQualityReport: result } : { activePackagedReport: result }), currentScreen: screen });
+    return true;
+  } catch (error) {
+    if (!current()) return false;
+    scanResponse(undefined, false, id);
+    useAppStore.setState({ ...clearedReports, errorMessage: getFriendlyScanErrorMessage(error, endpoint === '/scan/barcode'), currentScreen: 'IMAGE_PREVIEW' });
+    return false;
+  } finally {
+    // A late request must never clear the newer request's loading state.
+    if (useAppStore.getState().activeScanRequestId === id) useAppStore.setState({ isLoading: false, activeScanRequestId: null });
+    if (activeScan?.id === id) activeScan = null;
+  }
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   currentScreen: 'SPLASH',
   previousScreen: null,
@@ -114,15 +169,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   favorites: [],
   isLoading: false,
   errorMessage: null,
+  activeScanRequestId: null,
+  cancelScan: cancelCurrentScan,
 
-  setScreen: (screen) => set((state) => ({ previousScreen: state.currentScreen, currentScreen: screen })),
-  goBack: () => set((state) => ({ currentScreen: state.previousScreen || 'DASHBOARD' })),
-  setScanMode: (mode) => set({ scanMode: mode }),
-  setFoodCategory: (category) => set({ foodCategory: category }),
-  setCapturedImage: (img) => set({ capturedImage: img }),
-  setCapturedBarcode: (barcode) => set({ capturedBarcode: barcode }),
+  setScreen: (screen) => { if (screen !== 'AI_PROCESSING') cancelCurrentScan(); set((state) => ({ previousScreen: state.currentScreen, currentScreen: screen })); },
+  goBack: () => { cancelCurrentScan(); set((state) => ({ currentScreen: state.previousScreen || 'DASHBOARD' })); },
+  setScanMode: (mode) => { if (get().scanMode !== mode) cancelCurrentScan(); set({ scanMode: mode }); },
+  setFoodCategory: (category) => { if (get().foodCategory !== category) cancelCurrentScan(); set({ foodCategory: category }); },
+  setCapturedImage: (img) => { if (get().capturedImage !== img) { cancelCurrentScan(); set({ ...clearedReports, errorMessage: null }); } set({ capturedImage: img }); },
+  setCapturedBarcode: (barcode) => { if (get().capturedBarcode !== barcode) cancelCurrentScan(); set({ capturedBarcode: barcode }); },
   
   setUser: (user, token) => {
+    if (get().token !== token || get().user?.id !== user?.id) cancelCurrentScan();
     setAuthToken(token);
     if (typeof window !== 'undefined') {
       if (token) localStorage.setItem('foodscan_auth_token', token);
@@ -134,6 +192,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   logout: () => {
+    cancelCurrentScan();
     setAuthToken(null);
     if (typeof window !== 'undefined') {
       localStorage.removeItem('foodscan_auth_token');
@@ -142,158 +201,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ user: null, token: null, authStatus: 'ready', currentScreen: 'AUTH', isLoading: false, historyStatus: 'idle', history: [], favorites: [], activeMealReport: null, activePackagedReport: null, activeQualityReport: null, capturedImage: null, capturedBarcode: null, errorMessage: null });
   },
 
-  processBarcodeScan: async (barcode: string) => {
-    if (get().isLoading) return false;
-    const scanToken = get().token;
-    set({
-      isLoading: true,
-      errorMessage: null,
-      activePackagedReport: null,
-      activeMealReport: null,
-      activeQualityReport: null
-    });
-    try {
-      const response = await apiClient.post('/scan/barcode', { barcode });
-      if (get().token !== scanToken) return false;
-      if (response.data?.success && response.data.data?.analysis) {
-        const analysis: PackagedFoodAnalysis = response.data.data.analysis;
-        set({ activePackagedReport: analysis, isLoading: false, currentScreen: 'PACKAGED_REPORT' });
-        return true;
-      } else {
-        const errorMsg = response.data?.error?.message || (typeof response.data?.error === 'string' ? response.data.error : 'Food barcode lookup failed. Please try again.');
-        set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
-        return false;
-      }
-    } catch (err: any) {
-      if (get().token !== scanToken) return false;
-      const errorMsg = err.response?.data?.error?.message || (typeof err.response?.data?.error === 'string' ? err.response.data.error : 'Food barcode lookup failed. Please try again.');
-      console.warn('Barcode scan error:', errorMsg);
-      set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
-      return false;
-    }
-  },
-
-  processPackagedScan: async (base64Image: string, customItemName?: string, foodCategory?: FoodCategory) => {
-    if (get().isLoading) return false;
-    const scanToken = get().token;
-    set({
-      isLoading: true,
-      errorMessage: null,
-      activePackagedReport: null,
-      activeMealReport: null,
-      activeQualityReport: null
-    });
-    const currentCategory = foodCategory || get().foodCategory;
-    try {
-      const response = await apiClient.post('/scan/packaged', {
-        imageBase64: base64Image,
-        mimeType: getImageMimeType(base64Image),
-        customItemName,
-        foodCategory: currentCategory
-      });
-      if (get().token !== scanToken) return false;
-      if (response.data?.success && response.data.data?.analysis) {
-        const analysis: PackagedFoodAnalysis = response.data.data.analysis;
-        set({ activePackagedReport: analysis, isLoading: false, currentScreen: 'PACKAGED_REPORT' });
-        return true;
-      } else {
-        const errorMsg = apiErrorMessage(response.data?.error, 'Food image analysis failed. Please try again.');
-        set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
-        return false;
-      }
-    } catch (err: any) {
-      if (get().token !== scanToken) return false;
-      const errorMsg = apiErrorMessage(err.response?.data?.error, !err.response ? 'Cannot reach the server. Please check your connection.' : 'Food image analysis failed. Please try again.');
-      console.warn('Packaged scan error:', errorMsg);
-      set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
-      return false;
-    }
-  },
-
-  processMealScan: async (base64Image: string, customDishName?: string, foodCategory?: FoodCategory) => {
-    if (get().isLoading) return false;
-    const scanToken = get().token;
-    set({
-      isLoading: true,
-      errorMessage: null,
-      activePackagedReport: null,
-      activeMealReport: null,
-      activeQualityReport: null
-    });
-    const currentCategory = foodCategory || get().foodCategory;
-    try {
-      console.log('[Meal Scan] Dispatching POST /scan/meal to backend ...');
-      const response = await apiClient.post('/scan/meal', {
-        imageBase64: base64Image,
-        mimeType: getImageMimeType(base64Image),
-        customDishName,
-        foodCategory: currentCategory
-      });
-      if (get().token !== scanToken) return false;
-      console.log('[Meal Scan] Backend responded with status:', response.status);
-
-      const mealAnalysis: MealFoodAnalysis | undefined =
-        response.data?.data?.mealAnalysis || response.data?.data?.analysis;
-      if (response.data?.success && mealAnalysis) {
-        console.log('[Meal Scan Success] Report ready.');
-        set({ activeMealReport: mealAnalysis, isLoading: false, currentScreen: 'MEAL_REPORT' });
-        return true;
-      } else {
-        const errorMsg = apiErrorMessage(response.data?.error, 'Food image analysis failed. Please try again.');
-        console.warn('[Meal Scan Response Missing Analysis]', {
-          status: response.status,
-          success: response.data?.success,
-          hasMealAnalysis: !!mealAnalysis,
-        });
-        set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
-        return false;
-      }
-    } catch (err: any) {
-      if (get().token !== scanToken) return false;
-      const status = err.response?.status;
-      const statusText = err.response?.statusText;
-      const backendError = err.response?.data?.error || err.response?.data?.message || err.response?.data?.details;
-      const errorMsg = apiErrorMessage(err.response?.data?.error, !err.response ? 'Cannot reach the server. Please check your connection.' : 'Food image analysis failed. Please try again.');
-      
-      console.warn('[Meal Scan Request Failed]', { httpStatus: status });
-      set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
-      return false;
-    }
-  },
-
-  processQualityScan: async (base64Image: string) => {
-    if (get().isLoading) return false;
-    const scanToken = get().token;
-    set({
-      isLoading: true,
-      errorMessage: null,
-      activePackagedReport: null,
-      activeMealReport: null,
-      activeQualityReport: null
-    });
-    try {
-      const response = await apiClient.post('/scan/quality', {
-        imageBase64: base64Image,
-        mimeType: getImageMimeType(base64Image)
-      });
-      if (get().token !== scanToken) return false;
-      if (response.data?.success && response.data.data?.qualityResult) {
-        const qualityResult: QualityAnalysis = response.data.data.qualityResult;
-        set({ activeQualityReport: qualityResult, isLoading: false, currentScreen: 'QUALITY_REPORT' });
-        return true;
-      } else {
-        const errorMsg = apiErrorMessage(response.data?.error, 'Food image analysis failed. Please try again.');
-        set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
-        return false;
-      }
-    } catch (err: any) {
-      if (get().token !== scanToken) return false;
-      const errorMsg = apiErrorMessage(err.response?.data?.error, !err.response ? 'Cannot reach the server. Please check your connection.' : 'Food image analysis failed. Please try again.');
-      console.warn('Quality scan error:', errorMsg);
-      set({ isLoading: false, errorMessage: errorMsg, currentScreen: 'IMAGE_PREVIEW' });
-      return false;
-    }
-  },
+  processBarcodeScan: (barcode) => runScan('/scan/barcode', { barcode }, 'PACKAGED_REPORT'),
+  processPackagedScan: (base64Image, customItemName, foodCategory) => runScan('/scan/packaged', {
+    imageBase64: base64Image, mimeType: getImageMimeType(base64Image), customItemName, foodCategory: foodCategory || get().foodCategory
+  }, 'PACKAGED_REPORT'),
+  processMealScan: (base64Image, customDishName, foodCategory) => runScan('/scan/meal', {
+    imageBase64: base64Image, mimeType: getImageMimeType(base64Image), customDishName, foodCategory: foodCategory || get().foodCategory
+  }, 'MEAL_REPORT'),
+  processQualityScan: (base64Image) => runScan('/scan/quality', {
+    imageBase64: base64Image, mimeType: getImageMimeType(base64Image)
+  }, 'QUALITY_REPORT'),
 
   fetchHistory: async () => {
     const token = get().token;

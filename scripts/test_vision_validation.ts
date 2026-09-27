@@ -35,16 +35,22 @@ assert.throws(() => validateMealVisionResult(noConfidence), { message: UNCLEAR_F
 const uncertain = food(); uncertain.items[0].confidence = 0.7;
 assert.deepEqual(validateMealVisionResult(uncertain).totalNutrition, emptyNutrition());
 const bad = food(); bad.items[0].nutrition.calories = 3000;
-assert.deepEqual(validateMealVisionResult(bad).totalNutrition, emptyNutrition());
-const missing: any = food(); missing.items[0].nutrition = { calories: 130, protein: '2.7', fat: -1 };
+assert.throws(() => validateMealVisionResult(bad), { code: 'AI_INVALID_RESPONSE' });
+for (const invalid of [{ protein: '2.7' }, { fat: -1 }, { calories: Infinity }, { sodium: 50000 }]) {
+  const malformed: any = food(); malformed.items[0].nutrition = invalid;
+  assert.throws(() => validateMealVisionResult(malformed), { code: 'AI_INVALID_RESPONSE' });
+}
+const missing: any = food(); missing.items[0].nutrition = { calories: 130, protein: null };
 const missingResult = validateMealVisionResult(missing);
 assert.equal(missingResult.totalNutrition.protein, null);
 assert.equal(missingResult.totalNutrition.fat, null);
 assert.equal(missingResult.totalNutrition.carbs, null);
 const inconsistent: any = food(); inconsistent.items[0].nutrition.sugar = 50;
-assert.equal(validateMealVisionResult(inconsistent).totalNutrition.sugar, null);
+assert.throws(() => validateMealVisionResult(inconsistent), { code: 'AI_INVALID_RESPONSE' });
 const tiny = food(); tiny.items[0].estimatedPortion = '1 g';
-assert.deepEqual(validateMealVisionResult(tiny).totalNutrition, emptyNutrition());
+assert.throws(() => validateMealVisionResult(tiny), { code: 'AI_INVALID_RESPONSE' });
+const negativePortion = food(); negativePortion.items[0].estimatedPortion = '-100 g';
+assert.throws(() => validateMealVisionResult(negativePortion), { code: 'AI_INVALID_RESPONSE' });
 const fullConfidence = food(); fullConfidence.classificationConfidence = 1;
 fullConfidence.items[0].confidence = 1; fullConfidence.items[0].portionConfidence = 1;
 fullConfidence.confidence = { itemsRecognition: 1, portionVolume: 1, totalNutrition: 1, overall: 1 };

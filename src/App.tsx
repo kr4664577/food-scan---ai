@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppStore } from './store/useAppStore';
-import { scanRendered } from './utils/scanPerformance';
+import { scanRendered, scanRequestId } from './utils/scanPerformance';
 import { Header } from './components/Header';
 import { BottomNavigation } from './components/BottomNavigation';
 
@@ -27,8 +27,9 @@ export const App: React.FC = () => {
   React.useEffect(() => {
     if (!['MEAL_REPORT', 'PACKAGED_REPORT', 'QUALITY_REPORT'].includes(currentScreen)) return;
     // Two frames approximate the first presented report, rather than React setState time.
+    const requestId = scanRequestId();
     let second = 0;
-    const first = requestAnimationFrame(() => { second = requestAnimationFrame(scanRendered); });
+    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => scanRendered(requestId)); });
     return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
   }, [currentScreen]);
 

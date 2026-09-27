@@ -1,23 +1,24 @@
 import axios from 'axios';
 import { GoogleGenAI } from '@google/genai';
-import { timeScan } from '../middlewares/scanTiming';
-import { retryAfterSeconds } from './providerRetry';
+import { timeScan, logScanFailure, scanAbortSignal } from '../middlewares/scanTiming';
+import { normalizeImageInput } from './ai.service';
+import { AIProviderError, classifyProviderError, isModelUnavailable, providerHttpStatus } from './providerErrors';
+import { retryAfterSeconds, runProviderAttempt, waitForProviderRetry, providerRetryDelay, VISION_DEADLINE_MS, MAX_PROVIDER_CALLS, MAX_TRANSIENT_RETRIES } from './providerRetry';
 
 const getGrokApiKey = () => process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
 const getGeminiApiKey = () => process.env.GEMINI_API_KEY || '';
 let client: GoogleGenAI | undefined;
 let clientKey: string | undefined;
+const cooldowns = new WeakMap<GoogleGenAI, { until: number; code: 'AI_QUOTA_EXCEEDED' | 'AI_TEMPORARY_ERROR' }>();
 const visionClient = (apiKey: string) => {
   if (!client || clientKey !== apiKey) {
     clientKey = apiKey;
-    // This service owns retries. SDK defaults must not multiply our attempts.
     client = new GoogleGenAI({ apiKey, httpOptions: {
       headers: { 'User-Agent': 'aistudio-build' }, retryOptions: { attempts: 1 },
       fetch: async (input, init) => {
         const response = await globalThis.fetch(input, init);
-        // SDK ApiError does not retain response headers. Preserve only cooldown
-        // metadata on retryable failures, without retaining the request/key.
-        if ([429, 503].includes(response.status) && retryAfterSeconds({ headers: response.headers })) {
+        // SDK errors omit headers. Retain only safe retry metadata.
+        if ([429, 500, 502, 503].includes(response.status) && retryAfterSeconds({ headers: response.headers })) {
           await response.body?.cancel();
           throw Object.assign(new Error('Provider requested a cooldown.'), { status: response.status, headers: { 'retry-after': response.headers.get('retry-after') } });
         }
@@ -27,202 +28,83 @@ const visionClient = (apiKey: string) => {
   }
   return client;
 };
+// Preserve model preference/quality. Only model-unavailable errors advance it.
+const GEMINI_VISION_MODELS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
 
-import { normalizeBase64Image, normalizeImageInput, logSafeDebug } from './ai.service';
-
-// Active, supported Gemini vision models in priority order
-const GEMINI_VISION_MODELS = [
-  'gemini-3.8-flash',
-  'gemini-flash-latest',
-  'gemini-3.1-flash-lite',
-  'gemini-2.5-flash'
-];
-
-/**
- * Unified Vision AI Engine
- * Supports Google Gemini Vision (@google/genai & fallback) and optional Grok 2 Vision
- */
-export const runUnifiedVisionAnalysis = async (params: {
-  prompt: string;
-  imageBase64: string;
-  mimeType?: string;
-  scanType?: string;
-}): Promise<any> => {
-  const { prompt, imageBase64, mimeType = 'image/jpeg', scanType = 'VISION_ANALYSIS' } = params;
-  
-  let normalized;
+function parseVisionResponse(text: unknown): Record<string, any> {
+  if (typeof text !== 'string' || !text.trim()) throw new AIProviderError('AI_INVALID_RESPONSE');
+  const cleaned = text.trim().replace(/^\`\`\`(?:json)?\s*/i, '').replace(/\s*\`\`\`$/i, '');
   try {
-    normalized = await timeScan('normalize', () => normalizeImageInput(imageBase64, mimeType));
-  } catch (err: any) {
-    console.error(`[Vision AI Error] Failed to normalize image for ${scanType}:`, err?.message || err);
-    logSafeDebug({
-      scanType,
-      mimeType,
-      base64Length: 0,
-      parseError: 'Failed to normalize Base64 input'
-    });
-    throw new Error(`Failed to process food image input: ${err?.message || 'Invalid image data'}`);
-  }
+    const result = JSON.parse(cleaned);
+    if (!result || typeof result !== 'object' || Array.isArray(result) || !Object.keys(result).length) throw new Error();
+    return result;
+  } catch { throw new AIProviderError('AI_INVALID_RESPONSE'); }
+}
 
-  const { cleanBase64, mimeType: finalMimeType } = normalized;
-
-  console.log(`[Vision AI Request] ScanType: ${scanType}, MIME: ${finalMimeType}, Base64 Length: ${cleanBase64.length}`);
-  logSafeDebug({
-    scanType,
-    mimeType: finalMimeType,
-    base64Length: cleanBase64.length
-  });
-
-  const geminiErrors: string[] = [];
-
-  // 1. Try Google Gemini Vision if GEMINI_API_KEY is configured
+export const runUnifiedVisionAnalysis = async (params: {
+  prompt: string; imageBase64: string; mimeType?: string; scanType?: string; signal?: AbortSignal;
+}): Promise<any> => {
+  const started = Date.now(), deadlineAt = started + VISION_DEADLINE_MS;
+  const signal = params.signal || scanAbortSignal();
+  if (signal?.aborted) throw new AIProviderError('AI_TIMEOUT');
   const geminiKey = getGeminiApiKey();
-  if (geminiKey) {
-    const modernAI = visionClient(geminiKey);
-    let requestCount = 0;
-    let transientRetries = 0;
-
-    for (const modelName of GEMINI_VISION_MODELS) {
-      if (requestCount >= 5) break;
-      let attempts = 0;
-      while (attempts < 2 && requestCount < 5) {
-        attempts++;
-        requestCount++;
+  const modernAI = geminiKey ? visionClient(geminiKey) : undefined;
+  const cooldown = modernAI && cooldowns.get(modernAI);
+  if (cooldown && cooldown.until > Date.now()) throw new AIProviderError(cooldown.code, { retryAfterSeconds: Math.ceil((cooldown.until - Date.now()) / 1000) });
+  let normalized;
+  try { normalized = await timeScan('normalize', () => normalizeImageInput(params.imageBase64, params.mimeType || 'image/jpeg')); }
+  catch { throw Object.assign(new Error('This image could not be read. Please choose a clear photo.'), { code: 'INVALID_IMAGE', statusCode: 400, retryable: false, publicMessage: 'This image could not be read. Please choose a clear photo.' }); }
+  const { cleanBase64, mimeType } = normalized;
+  let calls = 0, retries = 0;
+  if (modernAI) {
+    for (const model of GEMINI_VISION_MODELS) {
+      while (calls < MAX_PROVIDER_CALLS) {
+        calls++;
         try {
-          console.log(`[Gemini Vision] Attempting model: ${modelName} (attempt ${attempts}) for ${scanType}...`);
-          
-          // Try modern @google/genai SDK
-          const response = await timeScan('gemini', () => modernAI.models.generateContent({
-            model: modelName,
-            contents: [
-              {
-                inlineData: {
-                  mimeType: finalMimeType,
-                  data: cleanBase64
-                }
-              },
-              { text: prompt }
-            ],
-            config: {
-              responseMimeType: 'application/json'
-            }
-          }));
-
-          const text = (response.text || '').trim();
-          if (!text) {
-            throw new Error(`Empty response received from ${modelName}`);
-          }
-
-          console.log(`[Gemini Vision Success] Model ${modelName} responded (length: ${text.length} chars)`);
-          logSafeDebug({
-            scanType,
-            mimeType: finalMimeType,
-            base64Length: cleanBase64.length,
-            geminiStatus: `HTTP 200 OK (${modelName})`
-          });
-
-          // Direct parse if JSON format was returned
-          try {
-            const parsed = await timeScan('ai_parse', async () => JSON.parse(text));
-            return parsed;
-          } catch (e) {
-            // Strip code fences or extract object if wrapped
-            const cleanText = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-            try {
-              return JSON.parse(cleanText);
-            } catch (e2) {
-              const jsonMatch = text.match(/\{[\s\S]*\}/);
-              if (jsonMatch) {
-                return JSON.parse(jsonMatch[0]);
-              }
-              throw new Error('Invalid JSON output from vision provider.');
-            }
-          }
-        } catch (geminiErr: any) {
-          const errStatus = geminiErr?.status || geminiErr?.code || 'ERROR';
-          const detailedMsg = `[${modelName} / ${Number(errStatus) || 'ERROR'}]`;
-          geminiErrors.push(detailedMsg);
-          console.warn(`[Gemini Vision Warning] ${modelName} attempt ${attempts} failed (status ${Number(errStatus) || 'ERROR'}).`);
-          // Authentication/quota failures are not cured by rapid duplicate calls.
-          if ([401, 403, 429].includes(Number(errStatus))) {
-            const error = new Error(Number(errStatus) === 429 ? 'AI service is busy or its quota is exhausted. Please try again later.' : 'AI service is unavailable. Please try again later.');
-            Object.assign(error, { statusCode: Number(errStatus) === 429 ? 429 : 503, publicMessage: error.message, retryAfterSeconds: retryAfterSeconds(geminiErr) });
+          const response = await timeScan('gemini', () => runProviderAttempt(abortSignal => modernAI.models.generateContent({
+            model, contents: [{ inlineData: { mimeType, data: cleanBase64 } }, { text: params.prompt }],
+            config: { responseMimeType: 'application/json', abortSignal }
+          }), { deadlineAt, signal }));
+          return await timeScan('ai_parse', async () => parseVisionResponse(response.text));
+        } catch (raw) {
+          const error = classifyProviderError(raw);
+          logScanFailure({ category: error.category, httpStatus: providerHttpStatus(raw) || error.statusCode, provider: 'gemini', model, durationMs: Date.now() - started, retryCount: retries });
+          if (error.code === 'AI_QUOTA_EXCEEDED' || error.retryAfterSeconds) {
+            const seconds = error.retryAfterSeconds || 60;
+            cooldowns.set(modernAI, { until: Date.now() + seconds * 1000, code: error.code === 'AI_QUOTA_EXCEEDED' ? error.code : 'AI_TEMPORARY_ERROR' });
             throw error;
           }
-
-          // Never wait/retry automatically when the provider asks for a cooldown.
-          const retryAfter = retryAfterSeconds(geminiErr);
-          if (retryAfter) {
-            throw Object.assign(new Error('AI service is temporarily busy. Please try again later.'), { statusCode: 503, publicMessage: 'AI service is temporarily busy. Please try again later.', retryAfterSeconds: retryAfter });
-          }
-          // Retry a transient failure once across the entire fallback chain.
-          if ((Number(errStatus) === 503 || Number(errStatus) === 500) && attempts < 2 && transientRetries < 1) {
-            transientRetries++;
-            await new Promise((r) => setTimeout(r, 1200));
+          if (isModelUnavailable(raw)) break;
+          if (['AI_TEMPORARY_ERROR', 'AI_NETWORK_ERROR'].includes(error.code) && retries < MAX_TRANSIENT_RETRIES && calls < MAX_PROVIDER_CALLS) {
+            try { await waitForProviderRetry(providerRetryDelay(retries++), deadlineAt, signal); }
+            catch (deadlineError) { throw classifyProviderError(deadlineError); }
             continue;
           }
-          break; // Move to next fallback model
+          throw error;
         }
       }
     }
-  } else {
-    geminiErrors.push('GEMINI_API_KEY is not set or empty in environment.');
-    console.warn('[Gemini Vision] GEMINI_API_KEY is missing from environment variables.');
   }
-
-  // 2. Try xAI Grok 2 Vision if GROK_API_KEY is configured (fallback)
+  // Existing opt-in xAI fallback remains only for unavailable Gemini models or
+  // absent Gemini configuration. Never send a quota/failed-response retry to xAI.
   const grokKey = getGrokApiKey();
-  if (grokKey) {
+  if (grokKey && calls < MAX_PROVIDER_CALLS) {
     try {
-      console.log(`[Grok Vision] Attempting xAI Grok fallback for ${scanType}...`);
-      const dataUrl = `data:${finalMimeType};base64,${cleanBase64}`;
-      const response = await axios.post(
-        'https://api.x.ai/v1/chat/completions',
-        {
-          model: 'grok-2-vision-1212',
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: `${prompt}\n\nCRITICAL: Respond in STRICT RAW JSON format matching the schema. Do not enclose in markdown ticks if possible, or use standard markdown json blocks.`
-                },
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: dataUrl
-                  }
-                }
-              ]
-            }
-          ],
-          temperature: 0.1,
-          max_tokens: 1500
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${grokKey}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 25000
-        }
-      );
-
-      const content = response.data?.choices?.[0]?.message?.content || '';
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-    } catch (grokErr: any) {
-      console.warn('⚠️ Grok Vision error:', grokErr?.response?.data || grokErr?.message);
-      geminiErrors.push(`Grok: ${grokErr?.message || String(grokErr)}`);
+      const response = await runProviderAttempt(abortSignal => axios.post('https://api.x.ai/v1/chat/completions', {
+        model: 'grok-2-vision-1212',
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: params.prompt + '\nReturn strict JSON only.' },
+          { type: 'image_url', image_url: { url: 'data:' + mimeType + ';base64,' + cleanBase64 } }
+        ] }], temperature: 0.1, max_tokens: 1500
+      }, { headers: { Authorization: 'Bearer ' + grokKey, 'Content-Type': 'application/json' }, signal: abortSignal, timeout: Math.max(1, deadlineAt - Date.now()) }), { deadlineAt, signal });
+      return parseVisionResponse(response.data?.choices?.[0]?.message?.content);
+    } catch (raw) {
+      const error = classifyProviderError(raw);
+      logScanFailure({ category: error.category, httpStatus: providerHttpStatus(raw) || error.statusCode, provider: 'xai', model: 'grok-2-vision-1212', durationMs: Date.now() - started, retryCount: 0 });
+      throw error;
     }
   }
-
-  // If all vision engines failed, raise a detailed error instead of returning null
-  console.error('[Vision AI Fatal] All Vision models failed:', geminiErrors);
-  throw new Error(`Vision AI analysis failed. Models attempted: ${geminiErrors.join(' | ')}`);
+  throw new AIProviderError('AI_UNKNOWN_ERROR');
 };
 
 /**

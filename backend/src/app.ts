@@ -50,7 +50,7 @@ app.use(
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-    exposedHeaders: ['Server-Timing', 'X-Scan-AI-Attempts', 'Retry-After']
+    exposedHeaders: ['Server-Timing', 'X-Scan-AI-Attempts', 'Retry-After', 'X-Request-ID']
   })
 );
 
@@ -62,7 +62,7 @@ app.use(bodyParsed);
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
-  message: { success: false, error: { message: 'Too many requests, please try again later.', statusCode: 429 } }
+  message: { success: false, error: { code: 'APP_RATE_LIMITED', message: 'Too many requests to FoodScan. Please wait before trying again.', retryable: true, statusCode: 429 } }
 });
 app.use('/api', limiter);
 

@@ -4,7 +4,7 @@ import { runPackagedIntelligencePipeline } from '../services/packagedIntelligenc
 import { runMealIntelligencePipeline } from '../services/mealIntelligence.service';
 import { QualityInspectionEngineFactory } from '../services/qualityIntelligence.service';
 import { prisma } from '../config/db';
-import { timeScan } from '../middlewares/scanTiming';
+import { timeScan, scanAbortSignal } from '../middlewares/scanTiming';
 
 export const scanBarcode = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
@@ -19,6 +19,7 @@ export const scanBarcode = async (req: AuthenticatedRequest, res: Response, next
     }
 
     const analysis = await timeScan('analysis', () => runPackagedIntelligencePipeline({ barcode }));
+    if (scanAbortSignal()?.aborted) return;
 
     // Save scan to database if authenticated
     let savedScan = null;
@@ -79,6 +80,7 @@ export const scanPackagedImage = async (req: AuthenticatedRequest, res: Response
     });
 
     const analysis = await timeScan('analysis', () => runPackagedIntelligencePipeline({ imageBase64, mimeType, customItemName }));
+    if (scanAbortSignal()?.aborted) return;
 
     let savedScan = null;
     if (userId) {
@@ -142,6 +144,7 @@ export const scanMealImage = async (req: AuthenticatedRequest, res: Response, ne
     });
 
     const mealAnalysis = await timeScan('analysis', () => runMealIntelligencePipeline({ imageBase64, mimeType, customDishName, foodCategory }));
+    if (scanAbortSignal()?.aborted) return;
 
     let savedScan = null;
     if (userId) {
@@ -206,6 +209,7 @@ export const scanVisualQuality = async (req: AuthenticatedRequest, res: Response
       imageBase64,
       mimeType || 'image/jpeg'
     );
+    if (scanAbortSignal()?.aborted) return;
 
     let savedScan = null;
     if (userId) {

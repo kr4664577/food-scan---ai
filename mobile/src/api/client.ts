@@ -1,6 +1,21 @@
 import axios from 'axios';
 import { beginScanRequest, scanUploaded, scanResponse } from '../utils/scanPerformance';
-let scanRetryAt = 0;
+declare module 'axios' {
+  interface AxiosRequestConfig { scanRequestId?: string; }
+}
+type Cooldown = { until: number; code: string };
+const scanCooldowns = new Map<string, Cooldown>();
+const scanBackend = (config: { baseURL?: string }) => (config.baseURL || '/api').replace(/\/+$/, '');
+const scanProvider = (url?: string) => url === '/scan/barcode' ? 'barcode' : 'gemini';
+const cooldownKey = (config: { baseURL?: string; url?: string }, scope = scanProvider(config.url)) => `${scanBackend(config)}|${scope}`;
+function cooldownSeconds(error: any): number | undefined {
+  const header = error.response?.headers?.['retry-after'];
+  const supplied = header ?? error.response?.data?.error?.retryAfterSeconds;
+  if (supplied === undefined || supplied === null || supplied === '') return undefined;
+  const numeric = Number(supplied);
+  const seconds = Number.isFinite(numeric) ? numeric : typeof header === 'string' ? (Date.parse(header) - Date.now()) / 1000 : NaN;
+  return Number.isFinite(seconds) && seconds >= 0 && seconds <= 604800 ? Math.ceil(seconds) : undefined;
+}
 
 export function apiErrorMessage(error: unknown, fallback: string): string {
   if (typeof error === 'string' && error) return error;
@@ -112,10 +127,19 @@ export const apiClient = axios.create({
 // Request logging interceptor
 apiClient.interceptors.request.use((config) => {
   if (config.method === 'post' && config.url?.startsWith('/scan/')) {
-    const seconds = Math.ceil((scanRetryAt - Date.now()) / 1000);
-    if (seconds > 0) throw Object.assign(new Error('Scan cooldown active.'), { config, response: { status: 429, headers: {}, data: { error: { message: `Please wait ${seconds} seconds before trying another scan.`, retryAfterSeconds: seconds } } } });
-    beginScanRequest();
-    config.onUploadProgress = (event) => { if (event.total && event.loaded >= event.total) scanUploaded(); };
+    // A locally blocked attempt never reaches the transport or moves its own deadline.
+    for (const key of [cooldownKey(config, 'app'), cooldownKey(config)]) {
+      const cooldown = scanCooldowns.get(key);
+      const seconds = cooldown ? Math.ceil((cooldown.until - Date.now()) / 1000) : 0;
+      if (seconds > 0) throw Object.assign(new Error('Scan cooldown active.'), { config, scanCooldown: true, response: { status: 429, headers: {}, data: { error: { code: cooldown!.code, retryAfterSeconds: seconds } } } });
+      if (cooldown) scanCooldowns.delete(key);
+    }
+    config.scanRequestId = beginScanRequest(config.scanRequestId);
+    const originalProgress = config.onUploadProgress;
+    config.onUploadProgress = (event) => {
+      if (!config.signal?.aborted && event.total && event.loaded >= event.total) scanUploaded(config.scanRequestId);
+      originalProgress?.(event);
+    };
   }
   const base = (config.baseURL || '').replace(/\/+$/, '');
   const path = (config.url || '').replace(/^\/+/, '');
@@ -127,7 +151,7 @@ apiClient.interceptors.request.use((config) => {
 // Response & error logging interceptor
 apiClient.interceptors.response.use(
   (response) => {
-    if (response.config.url?.startsWith('/scan/')) scanResponse(response.headers['server-timing'], response.data?.success === true);
+    if (response.config.url?.startsWith('/scan/') && !response.config.signal?.aborted) scanResponse(response.headers['server-timing'], response.data?.success === true, response.config.scanRequestId);
     const base = (response.config.baseURL || '').replace(/\/+$/, '');
     const path = (response.config.url || '').replace(/^\/+/, '');
     const fullUrl = response.config.url?.startsWith('http') ? response.config.url : `${base}/${path}`;
@@ -135,13 +159,17 @@ apiClient.interceptors.response.use(
     return response;
   },
   (error) => {
-    if (error.config?.url?.startsWith('/scan/') && [429, 503].includes(error.response?.status)) {
-      const header = error.response?.headers?.['retry-after'];
-      const numeric = Number(header ?? error.response?.data?.error?.retryAfterSeconds);
-      const seconds = Number.isFinite(numeric) ? numeric : typeof header === 'string' ? (Date.parse(header) - Date.now()) / 1000 : 0;
-      if (seconds > 0 && seconds <= 604800) scanRetryAt = Math.max(scanRetryAt, Date.now() + seconds * 1000);
+    if (error.config?.url?.startsWith('/scan/') && !error.scanCooldown && [429, 503].includes(error.response?.status)) {
+      const code = error.response?.data?.error?.code;
+      const quota = code === 'AI_QUOTA_EXCEEDED';
+      const seconds = cooldownSeconds(error) ?? (quota ? 60 : 0);
+      const scope = typeof code === 'string' && code.startsWith('AI_') ? scanProvider(error.config.url) : 'app';
+      if (seconds > 0) {
+        const key = cooldownKey(error.config, scope);
+        scanCooldowns.set(key, { until: Math.max(scanCooldowns.get(key)?.until || 0, Date.now() + seconds * 1000), code: quota ? code : scope === 'app' ? 'APP_RATE_LIMITED' : 'AI_TEMPORARY_ERROR' });
+      }
     }
-    if (error.config?.url?.startsWith('/scan/')) scanResponse(error.response?.headers?.['server-timing'], false);
+    if (error.config?.url?.startsWith('/scan/') && !error.config.signal?.aborted) scanResponse(error.response?.headers?.['server-timing'], false, error.config.scanRequestId);
     const base = (error.config?.baseURL || '').replace(/\/+$/, '');
     const path = (error.config?.url || '').replace(/^\/+/, '');
     const fullUrl = error.config?.url?.startsWith('http') ? error.config?.url : `${base}/${path}`;

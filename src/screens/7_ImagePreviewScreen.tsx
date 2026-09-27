@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { Sparkles, RefreshCw, ArrowLeft, CheckCircle2, FileSearch, Utensils, Edit3, Home, Store, Package, AlertCircle, Barcode, Loader2 } from 'lucide-react';
 import { FoodCategory, ScanMode } from '../types';
@@ -25,6 +25,12 @@ export const ImagePreviewScreen: React.FC = () => {
   const [manualBarcode, setManualBarcode] = useState(capturedBarcode || '');
   const [isDetectingBarcode, setIsDetectingBarcode] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const submitting = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   // Auto-detect barcode from image if in barcode mode and not yet detected
   useEffect(() => {
@@ -38,10 +44,13 @@ export const ImagePreviewScreen: React.FC = () => {
             setManualBarcode(code);
           }
         })
+        .catch(() => {
+          if (!isCancelled) setLocalError('Unable to read this barcode. Please enter the barcode digits manually.');
+        })
         .finally(() => {
           if (!isCancelled) setIsDetectingBarcode(false);
         });
-    }
+    } else setIsDetectingBarcode(false);
     return () => {
       isCancelled = true;
     };
@@ -95,38 +104,48 @@ export const ImagePreviewScreen: React.FC = () => {
   };
 
   const handleConfirm = async () => {
-    if (useAppStore.getState().isLoading || isDetectingBarcode) return;
+    if (submitting.current || useAppStore.getState().isLoading || isDetectingBarcode) return;
     setLocalError(null);
     if (!capturedImage && scanMode !== 'PACKAGED_BARCODE') return;
+    submitting.current = true;
+    try {
+      if (scanMode === 'PACKAGED_BARCODE') {
+        let codeToScan = manualBarcode.trim() || capturedBarcode?.trim();
+        if (!codeToScan && capturedImage) {
+          setIsDetectingBarcode(true);
+          codeToScan = (await detectBarcodeFromSource(capturedImage)) || '';
+          // Navigation/photo changes while detection runs invalidate this submission.
+          const current = useAppStore.getState();
+          if (!mounted.current || current.capturedImage !== capturedImage || current.scanMode !== scanMode || current.currentScreen !== 'IMAGE_PREVIEW') return;
+          setIsDetectingBarcode(false);
+        }
 
-    if (scanMode === 'PACKAGED_BARCODE') {
-      let codeToScan = manualBarcode.trim() || capturedBarcode?.trim();
-      if (!codeToScan && capturedImage) {
-        setIsDetectingBarcode(true);
-        codeToScan = (await detectBarcodeFromSource(capturedImage)) || '';
-        setIsDetectingBarcode(false);
-      }
+        if (!codeToScan) {
+          setLocalError('No barcode was detected in this photo. Please enter the barcode digits above or scan as a Packaged Food Photo.');
+          return;
+        }
 
-      if (!codeToScan) {
-        setLocalError('No barcode was detected in this photo. Please enter the barcode digits above or scan as a Packaged Food Photo.');
+        setCapturedBarcode(codeToScan);
+        setScreen('AI_PROCESSING');
+        await processBarcodeScan(codeToScan);
         return;
       }
 
-      setCapturedBarcode(codeToScan);
       setScreen('AI_PROCESSING');
-      await processBarcodeScan(codeToScan);
-      return;
-    }
 
-    setScreen('AI_PROCESSING');
-
-    if (scanMode === 'PACKAGED_PHOTO' || (foodCategory === 'OUTSIDE_PACKAGED' && scanMode !== 'MEAL_PHOTO')) {
-      await processPackagedScan(capturedImage!, customDishName, foodCategory);
-    } else if (scanMode === 'QUALITY_CHECK') {
-      await processQualityScan(capturedImage!);
-    } else {
-      // MEAL_PHOTO pipeline
-      await processMealScan(capturedImage!, customDishName, foodCategory);
+      if (scanMode === 'PACKAGED_PHOTO' || (foodCategory === 'OUTSIDE_PACKAGED' && scanMode !== 'MEAL_PHOTO')) {
+        await processPackagedScan(capturedImage!, customDishName, foodCategory);
+      } else if (scanMode === 'QUALITY_CHECK') {
+        await processQualityScan(capturedImage!);
+      } else {
+        // MEAL_PHOTO pipeline
+        await processMealScan(capturedImage!, customDishName, foodCategory);
+      }
+    } catch {
+      if (mounted.current) setLocalError('Unable to read this photo. Please try again or enter the barcode digits manually.');
+    } finally {
+      submitting.current = false;
+      if (mounted.current) setIsDetectingBarcode(false);
     }
   };
 

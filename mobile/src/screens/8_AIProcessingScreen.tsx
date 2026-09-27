@@ -34,6 +34,7 @@ export const AIProcessingScreen: React.FC = () => {
         </p>
         <p className="mt-4 text-sm text-slate-500" aria-live="off">{seconds}s elapsed</p>
         {seconds >= 12 && <p className="mt-5 text-sm text-slate-600 max-w-xs">The analysis is taking longer than usual. You don’t need to submit the photo again.</p>}
+        <button className="mt-5 text-sm font-semibold text-slate-600 underline" onClick={() => setScreen('IMAGE_PREVIEW')}>Cancel scan</button>
         <p className="mt-8 text-xs text-slate-500 max-w-xs">Photo-based nutrition is an estimate. Processing time depends on your connection and the AI service.</p>
       </>}
     </section>

@@ -58,7 +58,8 @@ assert.equal(await store.getState().processPackagedScan('offline-fixture'), fals
 assert.equal(await store.getState().processQualityScan('offline-fixture'), false);
 assert.equal(await store.getState().processBarcodeScan('offline-fixture'), false);
 assert.equal(postCalls, 1);
-finishScan!({ ...response({ success: true, data: { mealAnalysis: { detectedDishName: 'Offline UI fixture' } } }) });
+const mealFixture = { foodClassification: 'food', detectedDishName: 'Offline UI fixture', items: [{ name: 'Rice', estimatedPortion: null }], totalNutrition: { calories: null } };
+finishScan!(response({ success: true, data: { mealAnalysis: mealFixture } }));
 await scanning;
 assert.equal(store.getState().currentScreen, 'MEAL_REPORT');
 assert.equal(store.getState().isLoading, false);
@@ -82,7 +83,7 @@ assert.deepEqual(store.getState().history, [], 'Late history must not repopulate
 store.getState().setUser(profile, 'scan-session');
 const lateScan = store.getState().processMealScan('offline-fixture');
 store.getState().logout();
-finishScan!(response({ success: true, data: { mealAnalysis: { detectedDishName: 'Offline UI fixture' } } }));
+finishScan!(response({ success: true, data: { mealAnalysis: mealFixture } }));
 await lateScan;
 assert.equal(store.getState().activeMealReport, null);
 assert.equal(store.getState().currentScreen, 'AUTH');

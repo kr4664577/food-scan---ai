@@ -1,3 +1,4 @@
+import { AIProviderError } from './providerErrors';
 export const NUTRIENT_KEYS = ['calories', 'protein', 'carbs', 'fat', 'fiber', 'sugar', 'sodium', 'saturatedFat'] as const;
 export type NutrientKey = typeof NUTRIENT_KEYS[number];
 export type NullableNutrition = Record<NutrientKey, number | null>;
@@ -8,7 +9,9 @@ export const UNCLEAR_FOOD_MESSAGE = 'The food could not be identified confidentl
 export class FoodValidationError extends Error {
   statusCode = 422;
   publicMessage: string;
-  constructor(message: string) { super(message); this.publicMessage = message; }
+  retryable = false;
+  code: string;
+  constructor(message: string) { super(message); this.publicMessage = message; this.code = message === NON_FOOD_IMAGE_MESSAGE ? 'NON_FOOD_IMAGE' : 'FOOD_NOT_IDENTIFIED'; }
 }
 
 export interface ValidatedFoodItem {
@@ -48,20 +51,18 @@ export const validateNutrition = (raw: unknown, warnings: string[], name: string
   for (const key of NUTRIENT_KEYS) {
     const value = input[key];
     if (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= MAX_VALUE[key]) result[key] = value;
-    else if (value != null) warnings.push(`${name}: invalid ${key} was left unavailable.`);
+    else if (value != null) throw new AIProviderError('AI_INVALID_RESPONSE');
   }
   for (const [part, whole] of [['sugar', 'carbs'], ['fiber', 'carbs'], ['saturatedFat', 'fat']] as const) {
     if (result[part] !== null && result[whole] !== null && result[part]! > result[whole]! + 1) {
-      result[part] = null;
-      warnings.push(`${name}: inconsistent ${part} was left unavailable.`);
+      throw new AIProviderError('AI_INVALID_RESPONSE');
     }
   }
   if ([result.protein, result.carbs, result.fat, result.calories].every(value => value !== null)) {
     const energy = result.protein! * 4 + result.carbs! * 4 + result.fat! * 9;
     // Broad tolerance allows rounding/fiber; this catches major contradictions.
     if (Math.abs(result.calories! - energy) > Math.max(80, energy * 0.4)) {
-      warnings.push(`${name}: inconsistent energy/macronutrients; nutrition is unavailable.`);
-      return emptyNutrition();
+      throw new AIProviderError('AI_INVALID_RESPONSE');
     }
   }
   const mass = portion.match(/(\d+(?:\.\d+)?)\s*(kg|g|grams?)\b/i);
@@ -69,8 +70,7 @@ export const validateNutrition = (raw: unknown, warnings: string[], name: string
     const grams = Number(mass[1]) * (mass[2].toLowerCase() === 'kg' ? 1000 : 1);
     const macros = [result.protein, result.carbs, result.fat].filter((value): value is number => value !== null).reduce((sum, value) => sum + value, 0);
     if (grams <= 0 || macros > grams * 1.3 + 5 || (result.calories !== null && result.calories > grams * 9.5 + 20)) {
-      warnings.push(`${name}: nutrients did not fit the estimated portion and were left unavailable.`);
-      return emptyNutrition();
+      throw new AIProviderError('AI_INVALID_RESPONSE');
     }
   }
   return result;
@@ -84,10 +84,11 @@ export const validateMealVisionResult = (raw: unknown): ValidatedMealResult => {
   const warnings = texts(input.uncertaintyWarnings);
   const items: ValidatedFoodItem[] = inputs.map(rawItem => {
     const item = object(rawItem), name = text(item.name);
-    if (!name || UNKNOWN_NAME.test(name)) throw new FoodValidationError(UNCLEAR_FOOD_MESSAGE);
+    if (!name || !/\p{L}/u.test(name) || UNKNOWN_NAME.test(name)) throw new FoodValidationError(UNCLEAR_FOOD_MESSAGE);
     const certainty = Math.min(classificationConfidence, confidence(item.confidence));
     if (certainty < 0.65) throw new FoodValidationError(UNCLEAR_FOOD_MESSAGE);
     const portionConfidence = confidence(item.portionConfidence), rawPortion = text(item.estimatedPortion);
+    if (rawPortion && /(?:^|\s)-\s*\d/.test(rawPortion)) throw new AIProviderError('AI_INVALID_RESPONSE');
     const hasQuantity = rawPortion && /(?:\b[1-9]\d*(?:\.\d+)?|\b0\.\d*[1-9]|\b(?:one|two|half|quarter))\s*(?:g\b|kg\b|ml\b|grams?\b|milliliters?\b|cups?\b|pieces?\b|slices?\b|servings?\b|portions?\b|medium\b|small\b|large\b|tablespoons?\b|teaspoons?\b|fillets?\b|filets?\b)/i.test(rawPortion);
     const estimatedPortion = hasQuantity && portionConfidence >= 0.6 ? rawPortion : null;
     let nutrition = estimatedPortion ? validateNutrition(item.nutrition, warnings, name, estimatedPortion) : emptyNutrition();
